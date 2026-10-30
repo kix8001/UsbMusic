@@ -2,6 +2,7 @@ package app.usbmusic.player
 
 import android.app.Application
 import android.database.ContentObserver
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -42,6 +43,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var report by mutableStateOf<List<String>>(emptyList())
         private set
+
+    var mediaScanRunning by mutableStateOf(false)
+        private set
+    private var mediaScanRequested = false
 
     private var started = false
     private var scanJob: Job? = null
@@ -87,6 +92,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val tracks = repo.scan { n -> viewModelScope.launch { scanProgress = n } }
                 library = withContext(Dispatchers.Default) { Library(tracks) }
                 ArtLoader.resetMissing()
+                // USBがライブラリに未登録なら、一度だけ自動でAndroidに登録を依頼する
+                if (tracks.isEmpty() && repo.unindexedUsbDirs.isNotEmpty() && !mediaScanRequested) {
+                    requestMediaScan()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -96,6 +105,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     report = repo.report
                     scanning = false
                     loaded = true
+                }
+            }
+        }
+    }
+
+    /** AndroidのメディアスキャナーにUSBの中身を調べて登録するよう依頼する */
+    fun requestMediaScan() {
+        val dirs = repo.removableDirs()
+        if (dirs.isEmpty() || mediaScanRunning) return
+        mediaScanRequested = true
+        mediaScanRunning = true
+        var remaining = dirs.size
+        MediaScannerConnection.scanFile(getApplication(), dirs.toTypedArray(), null) { _, _ ->
+            viewModelScope.launch {
+                remaining--
+                if (remaining <= 0) {
+                    mediaScanRunning = false
+                    rescan()
                 }
             }
         }

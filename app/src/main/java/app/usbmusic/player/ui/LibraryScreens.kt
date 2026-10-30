@@ -68,8 +68,17 @@ fun LibraryEmpty(vm: MainViewModel, onOpenSettings: () -> Unit) {
                 color = Pal.Sub, fontSize = 17.sp,
             )
             Spacer(Modifier.height(20.dp))
+            if (vm.mediaScanRunning) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(color = Pal.Accent, modifier = Modifier.size(28.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("AndroidがUSBの曲を登録しています…（曲が多いと数分かかります）", color = Pal.Text, fontSize = 17.sp)
+                }
+                Spacer(Modifier.height(16.dp))
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 PillButton(Icons.Filled.Refresh, "再読み込み") { vm.rescan() }
+                PillButton(Icons.Filled.Usb, "USBを登録し直す") { vm.requestMediaScan() }
                 PillButton(Icons.Filled.Settings, "設定を開く", onOpenSettings)
             }
             DiagnosticsBlock(vm.report)

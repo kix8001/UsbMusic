@@ -82,8 +82,14 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
     var report: List<String> = emptyList()
         private set
 
+    /** メディアライブラリに曲が登録されていないUSBの場所（Androidに登録を依頼する対象） */
+    @Volatile
+    var unindexedUsbDirs: List<String> = emptyList()
+        private set
+
     suspend fun scan(progress: (Int) -> Unit): List<Track> = withContext(Dispatchers.IO) {
         val log = ArrayList<String>()
+        unindexedUsbDirs = emptyList()
         val previous = loadCache()?.filter { !it.fromMediaStore }?.associateBy { it.uri } ?: emptyMap()
         val result = try {
             if (prefs.sourceMode == Prefs.MODE_FOLDER) {
@@ -111,7 +117,9 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                 } else {
                     // ナビのメディアライブラリにUSBが登録されていない場合は、USBのファイルを直接探す
                     log += "→ USBのファイルを直接探します"
-                    fromStore + scanFilePaths(log, previous, progress)
+                    val direct = scanFilePaths(log, previous, progress)
+                    if (direct.isEmpty()) unindexedUsbDirs = removableDirs()
+                    fromStore + direct
                 }
             }
         } catch (e: CancellationException) {
@@ -161,6 +169,14 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
         }.onFailure { log += "ストレージ一覧エラー: ${it.message}" }
     }
 
+    fun removableDirs(): List<String> = runCatching {
+        if (Build.VERSION.SDK_INT < 30) return emptyList()
+        context.getSystemService(StorageManager::class.java)?.storageVolumes
+            ?.filter { it.isRemovable && it.state == android.os.Environment.MEDIA_MOUNTED }
+            ?.mapNotNull { it.directory?.path }
+            .orEmpty()
+    }.getOrDefault(emptyList())
+
     // ---------- ファイルを直接探す（予備） ----------
 
     private fun candidateRoots(): List<File> {
@@ -205,8 +221,9 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                 log += "直接検索 ${root.path}: 読み取れません（権限なし）"
                 continue
             }
-            walkFiles(root, root.name + "/", files, covers, anyImage, 0)
-            log += "直接検索 ${root.path}: 音楽 ${files.size - before}曲"
+            val stats = WalkStats()
+            walkFiles(root, root.name + "/", files, covers, anyImage, 0, stats)
+            log += "直接検索 ${root.path}: フォルダ ${stats.dirs} / ファイル ${stats.entries} / 音楽 ${files.size - before}曲"
         }
         return readAll(files, covers, anyImage, previous, progress)
     }
@@ -214,13 +231,15 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
     private fun walkFiles(
         dir: File, path: String,
         files: MutableList<FileEntry>, covers: MutableMap<String, String>, anyImage: MutableMap<String, String>,
-        depth: Int,
+        depth: Int, stats: WalkStats,
     ) {
         if (depth > 12) return
         val list = dir.listFiles() ?: return
+        stats.dirs++
         val dirs = ArrayList<File>()
         for (f in list) {
             val name = f.name
+            if (!f.isDirectory) stats.entries++
             if (name.startsWith(".") || name == "Android" || name == "LOST.DIR") continue
             if (f.isDirectory) {
                 dirs += f
@@ -235,7 +254,7 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                 if (stem in COVER_NAMES) covers[path] = uri else anyImage.putIfAbsent(path, uri)
             }
         }
-        for (d in dirs) walkFiles(d, path + d.name + "/", files, covers, anyImage, depth + 1)
+        for (d in dirs) walkFiles(d, path + d.name + "/", files, covers, anyImage, depth + 1, stats)
     }
 
     /** 接続中のUSB（リムーバブル）ボリューム名 */
@@ -307,7 +326,11 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                         )
                     }
                 }
-                log += "メディアライブラリ $vol: ${out.size - before}曲"
+                val all = runCatching {
+                    context.contentResolver.query(MediaStore.Files.getContentUri(vol), arrayOf("_id"), null, null, null)
+                        ?.use { it.count }
+                }.getOrNull()
+                log += "メディアライブラリ $vol: ${out.size - before}曲（登録ファイル総数 ${all ?: "不明"}）"
             } catch (e: Exception) {
                 log += "メディアライブラリ $vol: エラー ${e.javaClass.simpleName}: ${e.message}"
                 Log.w(TAG, "MediaStore query failed for $vol", e)

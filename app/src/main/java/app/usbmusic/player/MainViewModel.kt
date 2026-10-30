@@ -40,6 +40,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var treeUri by mutableStateOf(prefs.treeUri)
         private set
+    var report by mutableStateOf<List<String>>(emptyList())
+        private set
 
     private var started = false
     private var scanJob: Job? = null
@@ -91,6 +93,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Log.w("MainViewModel", "scan failed", e)
             } finally {
                 if (generation == scanGeneration) {
+                    report = repo.report
                     scanning = false
                     loaded = true
                 }

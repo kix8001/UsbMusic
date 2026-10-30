@@ -10,7 +10,9 @@ import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -75,37 +77,165 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
 
     // ---------- 読み込み ----------
 
-    suspend fun scan(progress: (Int) -> Unit): List<Track> = withContext(Dispatchers.IO) {
-        val result = if (prefs.sourceMode == Prefs.MODE_FOLDER) {
-            val tree = prefs.treeUri?.let(Uri::parse)
-            if (tree == null) emptyList() else {
-                val previous = loadCache()?.filter { !it.fromMediaStore }?.associateBy { it.uri } ?: emptyMap()
-                val files = ArrayList<FileEntry>()
-                val covers = HashMap<String, String>()
-                val anyImage = HashMap<String, String>()
-                walk(tree, DocumentsContract.getTreeDocumentId(tree), "", files, covers, anyImage, 0)
-                for ((folder, img) in anyImage) covers.putIfAbsent(folder, img)
+    /** 直近の読み込みの診断情報（曲が見つからない時に画面へ表示する） */
+    @Volatile
+    var report: List<String> = emptyList()
+        private set
 
-                val out = ArrayList<Track>(files.size)
-                files.forEachIndexed { i, f ->
-                    ensureActive()
-                    val cover = coverFor(f.folder, covers)
-                    val prev = previous[f.uri]
-                    out += if (prev != null && prev.lastModified == f.lastModified && f.lastModified != 0L) {
-                        prev.copy(cover = cover)
-                    } else {
-                        readTags(f, cover)
-                    }
-                    if (i % 10 == 0) progress(i)
+    suspend fun scan(progress: (Int) -> Unit): List<Track> = withContext(Dispatchers.IO) {
+        val log = ArrayList<String>()
+        val previous = loadCache()?.filter { !it.fromMediaStore }?.associateBy { it.uri } ?: emptyMap()
+        val result = try {
+            if (prefs.sourceMode == Prefs.MODE_FOLDER) {
+                val tree = prefs.treeUri?.let(Uri::parse)
+                if (tree == null) {
+                    log += "フォルダが選ばれていません"
+                    emptyList()
+                } else {
+                    log += "選択フォルダ: ${DocumentsContract.getTreeDocumentId(tree)}"
+                    val files = ArrayList<FileEntry>()
+                    val covers = HashMap<String, String>()
+                    val anyImage = HashMap<String, String>()
+                    val stats = WalkStats()
+                    walk(tree, DocumentsContract.getTreeDocumentId(tree), "", files, covers, anyImage, 0, stats)
+                    log += "フォルダ ${stats.dirs}個 / ファイル ${stats.entries}個を確認、音楽 ${files.size}曲"
+                    if (stats.error != null) log += "エラー: ${stats.error}"
+                    readAll(files, covers, anyImage, previous, progress)
                 }
-                progress(files.size)
-                out
+            } else {
+                volumeReport(log)
+                val fromStore = scanMediaStore(log)
+                val usbCount = fromStore.count { !it.folder.startsWith(MediaStore.VOLUME_EXTERNAL_PRIMARY + "/") }
+                if (usbCount > 0) {
+                    fromStore
+                } else {
+                    // ナビのメディアライブラリにUSBが登録されていない場合は、USBのファイルを直接探す
+                    log += "→ USBのファイルを直接探します"
+                    fromStore + scanFilePaths(log, previous, progress)
+                }
             }
-        } else {
-            scanMediaStore()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log += "読み込みエラー: ${e.javaClass.simpleName}: ${e.message}"
+            Log.w(TAG, "scan failed", e)
+            emptyList()
         }
-        saveCache(result)
+        report = log
+        if (result.isNotEmpty() || prefs.sourceMode == Prefs.MODE_FOLDER) saveCache(result)
         result
+    }
+
+    private suspend fun readAll(
+        files: List<FileEntry>,
+        covers: HashMap<String, String>,
+        anyImage: Map<String, String>,
+        previous: Map<String, Track>,
+        progress: (Int) -> Unit,
+    ): List<Track> = coroutineScope {
+        for ((folder, img) in anyImage) covers.putIfAbsent(folder, img)
+        val out = ArrayList<Track>(files.size)
+        files.forEachIndexed { i, f ->
+            ensureActive()
+            val cover = coverFor(f.folder, covers)
+            val prev = previous[f.uri]
+            out += if (prev != null && prev.lastModified == f.lastModified && f.lastModified != 0L) {
+                prev.copy(cover = cover)
+            } else {
+                readTags(f, cover)
+            }
+            if (i % 10 == 0) progress(i)
+        }
+        progress(files.size)
+        out
+    }
+
+    private fun volumeReport(log: MutableList<String>) {
+        runCatching {
+            val sm = context.getSystemService(StorageManager::class.java) ?: return
+            for (v in sm.storageVolumes) {
+                val path = if (Build.VERSION.SDK_INT >= 30) v.directory?.path ?: "-" else "-"
+                val name = if (Build.VERSION.SDK_INT >= 30) v.mediaStoreVolumeName ?: "-" else "-"
+                log += "ストレージ: ${v.getDescription(context)} / ${if (v.isRemovable) "取り外し可" else "本体"} / ${v.state} / $path / $name"
+            }
+        }.onFailure { log += "ストレージ一覧エラー: ${it.message}" }
+    }
+
+    // ---------- ファイルを直接探す（予備） ----------
+
+    private fun candidateRoots(): List<File> {
+        val roots = LinkedHashMap<String, File>()
+        fun add(f: File?) {
+            if (f == null) return
+            val key = runCatching { f.canonicalPath }.getOrDefault(f.path)
+            if (!roots.containsKey(key)) roots[key] = f
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            context.getSystemService(StorageManager::class.java)?.storageVolumes
+                ?.filter { it.isRemovable }?.forEach { add(it.directory) }
+        }
+        File("/storage").listFiles()?.forEach {
+            if (it.name != "emulated" && it.name != "self" && it.isDirectory) add(it)
+        }
+        listOf("/mnt/media_rw", "/mnt/usb", "/mnt/usb_storage", "/mnt/udisk", "/mnt/usbhost", "/mnt/usbotg").forEach { p ->
+            val d = File(p)
+            if (d.isDirectory) {
+                val kids = d.listFiles()?.filter { it.isDirectory }.orEmpty()
+                if (kids.isEmpty()) add(d) else kids.forEach(::add)
+            }
+        }
+        if (prefs.includeInternal) add(File("/storage/emulated/0/Music"))
+        return roots.values.toList()
+    }
+
+    private suspend fun scanFilePaths(
+        log: MutableList<String>,
+        previous: Map<String, Track>,
+        progress: (Int) -> Unit,
+    ): List<Track> {
+        val files = ArrayList<FileEntry>()
+        val covers = HashMap<String, String>()
+        val anyImage = HashMap<String, String>()
+        val roots = candidateRoots()
+        if (roots.isEmpty()) log += "直接検索: 候補の場所が見つかりません"
+        for (root in roots) {
+            val before = files.size
+            val listed = root.listFiles()
+            if (listed == null) {
+                log += "直接検索 ${root.path}: 読み取れません（権限なし）"
+                continue
+            }
+            walkFiles(root, root.name + "/", files, covers, anyImage, 0)
+            log += "直接検索 ${root.path}: 音楽 ${files.size - before}曲"
+        }
+        return readAll(files, covers, anyImage, previous, progress)
+    }
+
+    private fun walkFiles(
+        dir: File, path: String,
+        files: MutableList<FileEntry>, covers: MutableMap<String, String>, anyImage: MutableMap<String, String>,
+        depth: Int,
+    ) {
+        if (depth > 12) return
+        val list = dir.listFiles() ?: return
+        val dirs = ArrayList<File>()
+        for (f in list) {
+            val name = f.name
+            if (name.startsWith(".") || name == "Android" || name == "LOST.DIR") continue
+            if (f.isDirectory) {
+                dirs += f
+                continue
+            }
+            val ext = name.substringAfterLast('.', "").lowercase()
+            val uri = Uri.fromFile(f).toString()
+            if (ext in AUDIO_EXT) {
+                files += FileEntry(uri, name, path, f.lastModified())
+            } else if (ext in IMAGE_EXT) {
+                val stem = name.substringBeforeLast('.').lowercase()
+                if (stem in COVER_NAMES) covers[path] = uri else anyImage.putIfAbsent(path, uri)
+            }
+        }
+        for (d in dirs) walkFiles(d, path + d.name + "/", files, covers, anyImage, depth + 1)
     }
 
     /** 接続中のUSB（リムーバブル）ボリューム名 */
@@ -123,12 +253,16 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
         return labels
     }
 
-    private fun scanMediaStore(): List<Track> {
+    private fun scanMediaStore(log: MutableList<String>): List<Track> {
         val out = ArrayList<Track>()
         val volumes = MediaStore.getExternalVolumeNames(context)
         for (vol in volumes) {
             val isPrimary = vol == MediaStore.VOLUME_EXTERNAL_PRIMARY
-            if (isPrimary && !prefs.includeInternal) continue
+            if (isPrimary && !prefs.includeInternal) {
+                log += "メディアライブラリ $vol: 本体のため対象外"
+                continue
+            }
+            val before = out.size
             val base = MediaStore.Audio.Media.getContentUri(vol)
             val projection = arrayOf(
                 "_id", "title", "artist", "album", "album_artist", "track", "disc_number",
@@ -173,7 +307,9 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                         )
                     }
                 }
+                log += "メディアライブラリ $vol: ${out.size - before}曲"
             } catch (e: Exception) {
+                log += "メディアライブラリ $vol: エラー ${e.javaClass.simpleName}: ${e.message}"
                 Log.w(TAG, "MediaStore query failed for $vol", e)
             }
         }
@@ -190,11 +326,18 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
 
     private data class FileEntry(val uri: String, val name: String, val folder: String, val lastModified: Long)
 
+    private class WalkStats {
+        var dirs = 0
+        var entries = 0
+        var error: String? = null
+    }
+
     private fun walk(
         tree: Uri, docId: String, path: String,
         files: MutableList<FileEntry>, covers: MutableMap<String, String>, anyImage: MutableMap<String, String>,
-        depth: Int,
+        depth: Int, stats: WalkStats,
     ) {
+        stats.dirs++
         if (depth > 12) return
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
         val cols = arrayOf(
@@ -207,6 +350,7 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
         try {
             context.contentResolver.query(children, cols, null, null, null)?.use { c ->
                 while (c.moveToNext()) {
+                    stats.entries++
                     val id = c.getString(0)
                     val name = c.getString(1)
                     val mime = c.getString(2).orEmpty()
@@ -228,9 +372,10 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                 }
             }
         } catch (e: Exception) {
+            if (stats.error == null) stats.error = "$path: ${e.javaClass.simpleName}: ${e.message}"
             Log.w(TAG, "walk failed at $path", e)
         }
-        for ((id, name) in dirs) walk(tree, id, "$path$name/", files, covers, anyImage, depth + 1)
+        for ((id, name) in dirs) walk(tree, id, "$path$name/", files, covers, anyImage, depth + 1, stats)
     }
 
     private fun coverFor(folder: String, covers: Map<String, String>): String? {

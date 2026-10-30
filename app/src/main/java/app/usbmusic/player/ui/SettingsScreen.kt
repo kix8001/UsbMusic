@@ -81,9 +81,10 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         )
         ActionRow("ライブラリを再読み込み") { vm.rescan() }
         ActionRow("アルバムアートを読み込み直す") { vm.clearArtCache() }
+        Box(Modifier.padding(horizontal = 20.dp)) { DiagnosticsBlock(vm.report) }
 
         SectionHeader("このアプリについて")
-        InfoRow("USBミュージック 0.1.0")
+        InfoRow("USBミュージック 0.1.1")
     }
 }
 

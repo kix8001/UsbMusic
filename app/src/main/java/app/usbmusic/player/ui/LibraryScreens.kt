@@ -1,5 +1,6 @@
 package app.usbmusic.player.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
@@ -53,13 +55,24 @@ fun LibraryEmpty(vm: MainViewModel, onOpenSettings: () -> Unit) {
             CircularProgressIndicator(color = Pal.Accent)
         }
     } else {
-        CenterMessage(
-            "音楽が見つかりません",
-            "USBメモリを挿して少し待つか、設定で読み込み方法を変えてください。",
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(Icons.Filled.Usb, contentDescription = null, tint = Pal.Sub, modifier = Modifier.size(56.dp))
+            Spacer(Modifier.height(12.dp))
+            Text("音楽が見つかりません", color = Pal.Text, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "USBメモリを挿して少し待つか、設定で読み込み方法を変えてください。",
+                color = Pal.Sub, fontSize = 17.sp,
+            )
             Spacer(Modifier.height(20.dp))
-            PillButton(Icons.Filled.Settings, "設定を開く", onOpenSettings)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                PillButton(Icons.Filled.Refresh, "再読み込み") { vm.rescan() }
+                PillButton(Icons.Filled.Settings, "設定を開く", onOpenSettings)
+            }
+            DiagnosticsBlock(vm.report)
         }
     }
 }
@@ -355,5 +368,18 @@ fun SearchScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun DiagnosticsBlock(lines: List<String>) {
+    if (lines.isEmpty()) return
+    Column(
+        Modifier.fillMaxWidth().padding(top = 24.dp)
+            .background(Pal.Surface, RoundedCornerShape(12.dp)).padding(16.dp)
+    ) {
+        Text("診断情報", color = Pal.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        lines.forEach { Text(it, color = Pal.Sub, fontSize = 14.sp) }
     }
 }

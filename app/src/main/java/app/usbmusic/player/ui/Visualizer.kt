@@ -40,6 +40,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -48,6 +49,7 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     BLOCKS("blocks", "カラーブロック", "虹色のブロックが跳ね、床に映り込みます"),
     RETRO("retro", "レトロLED", "昔のLEDグラフィックイコライザー風"),
     RETRO_LR("retro_lr", "レトロLR", "左右チャンネルのLEDメーターが上下2段で横に振れます"),
+    VU("vu", "アナログVU", "琥珀色に光るアナログ針メーター（L・R）"),
     RETRO_LR_CENTER("retro_lr_center", "レトロLR センター", "中央から左（L）と右（R）へLEDが伸びます"),
     WAVE("wave", "レインボーウェーブ", "音の波が奥から手前へ流れる立体スペクトラム"),
     CIRCLE("circle", "サークル", "円形に広がるスペクトラムと波形"),
@@ -157,6 +159,10 @@ private class Meter {
     val cool = FloatArray(8)
     var idle = 0f
 
+    // アナログVUの針（ばねのように動く）
+    val needle = FloatArray(2)
+    val needleVel = FloatArray(2)
+
     class Lamp(var bright: Float = 1f, var target: Float = 1f, var state: Int = 0, var timer: Float = 0f, var chatter: Float = 0f)
     val lamps = ArrayList<Lamp>()
 }
@@ -210,6 +216,7 @@ fun Visualizer(
                 VisStyle.RETRO -> drawRetro(meter)
                 VisStyle.RETRO_LR -> drawRetroLR(meter)
                 VisStyle.RETRO_LR_CENTER -> drawRetroLRCenter(meter)
+                VisStyle.VU -> drawVu(meter)
                 VisStyle.RIPPLE -> drawRipple(meter, t)
                 VisStyle.WAVE -> drawWave(meter)
                 VisStyle.CIRCLE -> drawCircleVis(meter, t)
@@ -775,4 +782,113 @@ private fun DrawScope.drawRipple(m: Meter, t: Float) {
         val y = surfaceTop + (size.height - surfaceTop) * (i + 0.5f) / 6f + 3f * sin(t * 0.8f + i)
         drawLine(Color(0x0FFFFFFF), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
     }
+}
+
+// ---------------- アナログVU（琥珀色の針メーター） ----------------
+
+private const val VU_MIN = -20f
+private const val VU_MAX = 3f
+
+/** VU値 → 目盛り上の位置（0〜1）。実物と同じく電圧に比例した目盛り */
+private fun vuPos(vu: Float): Float {
+    val lo = 10f.pow(VU_MIN / 20f)
+    val hi = 10f.pow(VU_MAX / 20f)
+    return ((10f.pow(vu.coerceIn(VU_MIN, VU_MAX) / 20f) - lo) / (hi - lo)).coerceIn(0f, 1f)
+}
+
+private fun DrawScope.drawVu(m: Meter) {
+    drawRect(Color(0xFF1A1714))
+    // 針の動き：VUメーターらしく少しオーバーシュートして戻る
+    for (c in 0..1) {
+        val dbfs = m.lr[c] * 42f - 42f
+        val target = if (m.lr[c] <= 0.001f) 0f else vuPos(dbfs + 12f) // -12dBFS ≒ 0VU
+        val acc = 170f * (target - m.needle[c]) - 20f * m.needleVel[c]
+        m.needleVel[c] += acc * m.dt
+        m.needle[c] = (m.needle[c] + m.needleVel[c] * m.dt).coerceIn(-0.02f, 1.04f)
+    }
+    val gap = size.width * 0.03f
+    val meterW = (size.width - gap * 3) / 2
+    for (c in 0..1) {
+        val left = gap + c * (meterW + gap)
+        drawVuMeter(left, 6f, meterW, size.height - 12f, m.needle[c], if (c == 0) "L" else "R")
+    }
+}
+
+private fun DrawScope.drawVuMeter(x: Float, y: Float, w: Float, h: Float, pos: Float, ch: String) {
+    // 黒い枠
+    drawRoundRect(Color(0xFF0A0908), Offset(x, y), Size(w, h), androidx.compose.ui.geometry.CornerRadius(10f, 10f))
+    val inset = h * 0.07f
+    val fx = x + inset
+    val fy = y + inset
+    val fw = w - inset * 2
+    val fh = h - inset * 2
+    // 琥珀色のバックライト
+    drawRect(
+        Brush.radialGradient(
+            listOf(Color(0xFFF2B060), Color(0xFFD98A3A), Color(0xFF8A4A1C)),
+            center = Offset(fx + fw / 2, fy + fh * 0.75f),
+            radius = max(fw, fh) * 0.75f,
+        ),
+        Offset(fx, fy), Size(fw, fh),
+    )
+    val ink = Color(0xFF2A1608)
+    val cx = fx + fw / 2
+    val pivotY = fy + fh * 1.25f
+    val radius = min(fh * 1.0f, fw * 0.62f)
+    val sweep = 0.85f // ラジアン（左右それぞれ）
+    fun pointAt(p: Float, r: Float): Offset {
+        val a = -sweep + p * sweep * 2
+        return Offset(cx + sin(a) * r, pivotY - cos(a) * r)
+    }
+    // 目盛りの弧（0VU以上は赤）
+    val steps = 40
+    val zero = vuPos(0f)
+    for (i in 0 until steps) {
+        val p1 = i / steps.toFloat()
+        val p2 = (i + 1) / steps.toFloat()
+        val red = p1 >= zero
+        drawLine(
+            if (red) Color(0xFFC0281A) else ink,
+            pointAt(p1, radius), pointAt(p2, radius),
+            strokeWidth = if (red) 5f else 2f,
+        )
+    }
+    // 目盛りと数字
+    val marks = listOf(-20f, -10f, -7f, -5f, -3f, -2f, -1f, 0f, 1f, 2f, 3f)
+    val labelled = setOf(-20f, -10f, -7f, -5f, -3f, 0f, 3f)
+    for (v in marks) {
+        val p = vuPos(v)
+        val col = if (v > 0f) Color(0xFFC0281A) else ink
+        drawLine(col, pointAt(p, radius), pointAt(p, radius * 1.07f), strokeWidth = 2f)
+        if (v in labelled) {
+            val pt = pointAt(p, radius * 1.17f)
+            val text = if (v > 0f) "+${v.toInt()}" else v.toInt().toString()
+            label(text, pt.x, pt.y + fh * 0.04f, col, fh * 0.11f, bold = false)
+        }
+    }
+    // 中央の表示
+    label("VU", cx, fy + fh * 0.66f, ink, fh * 0.16f)
+    label(ch, fx + fw * 0.1f, fy + fh * 0.9f, ink.copy(alpha = 0.8f), fh * 0.12f)
+    // ピークランプ
+    val lampOn = pos > vuPos(1f)
+    val lamp = Offset(fx + fw * 0.9f, fy + fh * 0.84f)
+    drawCircle(if (lampOn) Color(0xFFFF3020) else Color(0xFF5A1A10), fh * 0.045f, lamp)
+    if (lampOn) drawCircle(Brush.radialGradient(listOf(Color(0x99FF3020), Color.Transparent), center = lamp, radius = fh * 0.14f), fh * 0.14f, lamp)
+    // 針（影と本体）。下の支点は文字盤の外にある
+    val tip = pointAt(pos.coerceIn(-0.02f, 1.04f), radius * 1.08f)
+    val baseY = fy + fh
+    val t = (pivotY - baseY) / (pivotY - tip.y)
+    val base = Offset(cx + (tip.x - cx) * t, baseY)
+    drawLine(Color(0x55000000), base + Offset(3f, 2f), tip + Offset(3f, 2f), strokeWidth = 2.6f, cap = StrokeCap.Round)
+    drawLine(Color(0xFF140A04), base, tip, strokeWidth = 2.2f, cap = StrokeCap.Round)
+    // 支点カバー
+    drawRect(Color(0xFF1A120C), Offset(fx, fy + fh * 0.93f), Size(fw, fh * 0.07f))
+    // ガラスの映り込み
+    drawRect(
+        Brush.linearGradient(
+            listOf(Color.White.copy(alpha = 0.12f), Color.Transparent, Color.Transparent),
+            start = Offset(fx, fy), end = Offset(fx + fw, fy + fh),
+        ),
+        Offset(fx, fy), Size(fw, fh),
+    )
 }

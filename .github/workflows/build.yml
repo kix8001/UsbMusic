@@ -21,7 +21,15 @@ jobs:
       - name: Build release APK
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease --stacktrace
+          set -o pipefail
+          ./gradlew assembleRelease 2>&1 | tee build.log
+
+      - name: Report errors
+        if: failure()
+        run: |
+          grep -E "^e: |error:|What went wrong" -A2 build.log | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
 
       - uses: actions/upload-artifact@v4
         with:

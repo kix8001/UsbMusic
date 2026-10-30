@@ -12,17 +12,30 @@ android {
         applicationId = "app.usbmusic.player"
         minSdk = 29
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
+    }
+
+    signingConfigs {
+        create("fixed") {
+            // 個人利用のアプリなので鍵をリポジトリ（非公開）に置き、毎回同じ署名にする
+            storeFile = file("usbmusic.jks")
+            storePassword = "usbmusic123"
+            keyAlias = "usbmusic"
+            keyPassword = "usbmusic123"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("fixed")
+        }
         release {
             // ナビで滑らかに動くよう最適化したリリース版を作る（署名はデバッグ鍵で、個人利用向け）
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixed")
         }
     }
 

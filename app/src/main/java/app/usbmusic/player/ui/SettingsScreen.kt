@@ -84,7 +84,7 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         Box(Modifier.padding(horizontal = 20.dp)) { DiagnosticsBlock(vm.report) }
 
         SectionHeader("このアプリについて")
-        InfoRow("USBミュージック 0.1.1")
+        InfoRow("USBミュージック 0.1.2")
     }
 }
 

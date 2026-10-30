@@ -98,7 +98,7 @@ fun ArtistsScreen(lib: Library, onArtist: (String) -> Unit) {
     val state = rememberLazyListState()
     IndexedList(
         list = lib.artists,
-        name = { it.name },
+        name = { it.sortName },
         state = state,
         header = { ScreenTitle("アーティスト") },
     ) { _, artist ->
@@ -296,7 +296,7 @@ fun SongsScreen(lib: Library, conn: PlayerConnection) {
     val currentId = conn.current?.mediaId
     IndexedList(
         list = lib.songs,
-        name = { it.title },
+        name = { it.sortTitle },
         state = state,
         header = {
             ScreenTitle("曲") {

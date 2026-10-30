@@ -44,6 +44,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var report by mutableStateOf<List<String>>(emptyList())
         private set
+    var tagProgress by mutableStateOf<Pair<Int, Int>?>(null)
+        private set
 
     var visualizer by mutableStateOf(VisStyle.of(prefs.visualizer))
         private set
@@ -111,12 +113,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (tracks.isEmpty() && repo.unindexedUsbDirs.isNotEmpty() && !mediaScanRequested) {
                     requestMediaScan()
                 }
+                // 並べ替え用の読み・曲順をIDタグから直接読む（初回のみ時間がかかる）
+                if (tracks.any { !it.tagsRead }) {
+                    tagProgress = 0 to tracks.count { !it.tagsRead }
+                    val enriched = repo.enrich(tracks) { done, total ->
+                        viewModelScope.launch { tagProgress = done to total }
+                    }
+                    library = withContext(Dispatchers.Default) { Library(enriched) }
+                    withContext(Dispatchers.IO) { repo.saveCache(enriched) }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w("MainViewModel", "scan failed", e)
             } finally {
                 if (generation == scanGeneration) {
+                    tagProgress = null
                     report = repo.report
                     scanning = false
                     loaded = true

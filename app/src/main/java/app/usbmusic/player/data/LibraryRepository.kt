@@ -50,7 +50,7 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
         null
     }
 
-    private fun saveCache(tracks: List<Track>) {
+    fun saveCache(tracks: List<Track>) {
         runCatching {
             val arr = JSONArray()
             tracks.forEach { arr.put(it.toJson()) }
@@ -65,6 +65,7 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
         .put(uri).put(title).put(artist).put(albumArtist).put(album)
         .put(trackNo).put(discNo).put(year).put(durationMs).put(folder)
         .put(cover ?: "").put(fromMediaStore).put(lastModified)
+        .put(fileName).put(titleSort).put(artistSort).put(albumArtistSort).put(albumSort).put(tagsRead)
 
     private fun JSONArray.toTrack(): Track = Track(
         uri = getString(0), title = getString(1), artist = getString(2),
@@ -73,7 +74,62 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
         durationMs = getLong(8), folder = getString(9),
         cover = getString(10).ifEmpty { null }, fromMediaStore = getBoolean(11),
         lastModified = getLong(12),
+        fileName = optString(13, ""), titleSort = optString(14, ""), artistSort = optString(15, ""),
+        albumArtistSort = optString(16, ""), albumSort = optString(17, ""), tagsRead = optBoolean(18, false),
     )
+
+    // ---------- IDタグの直接読み取り（読み・曲順・ディスク番号） ----------
+
+    private fun looksGarbled(s: String): Boolean =
+        s.isBlank() || s.any { it == '\uFFFD' || it.code in 0x80..0xFF }
+
+    private fun pick(current: String, tag: String): String =
+        if (tag.isNotBlank() && looksGarbled(current)) tag else current
+
+    fun applyTags(t: Track, info: TagInfo?): Track {
+        if (info == null) return t.copy(tagsRead = true)
+        return t.copy(
+            title = pick(t.title, info.title),
+            artist = pick(t.artist, info.artist),
+            albumArtist = if (t.albumArtist.isBlank()) info.albumArtist else pick(t.albumArtist, info.albumArtist),
+            album = pick(t.album, info.album),
+            trackNo = if (info.track > 0) info.track else t.trackNo,
+            discNo = if (info.disc > 0) info.disc else t.discNo,
+            titleSort = info.titleSort,
+            artistSort = info.artistSort,
+            albumArtistSort = info.albumArtistSort,
+            albumSort = info.albumSort,
+            tagsRead = true,
+        )
+    }
+
+    /** まだタグを読んでいない曲のタグを読む（初回のみ。2回目以降はキャッシュを使う） */
+    suspend fun enrich(tracks: List<Track>, progress: (Int, Int) -> Unit): List<Track> = withContext(Dispatchers.IO) {
+        val todo = tracks.count { !it.tagsRead }
+        var done = 0
+        tracks.map { t ->
+            if (t.tagsRead) t else {
+                ensureActive()
+                val r = applyTags(t, TagReader.read(context, Uri.parse(t.uri)))
+                done++
+                if (done % 20 == 0) progress(done, todo)
+                r
+            }
+        }
+    }
+
+    /** 前回読んだタグ情報を引き継ぐ（ファイルが変わっていなければ） */
+    private fun mergeCached(fresh: List<Track>, cached: Map<String, Track>): List<Track> = fresh.map { t ->
+        val c = cached[t.uri]
+        if (c != null && c.tagsRead && c.lastModified == t.lastModified) {
+            t.copy(
+                title = c.title, artist = c.artist, albumArtist = c.albumArtist, album = c.album,
+                trackNo = c.trackNo, discNo = c.discNo,
+                titleSort = c.titleSort, artistSort = c.artistSort,
+                albumArtistSort = c.albumArtistSort, albumSort = c.albumSort, tagsRead = true,
+            )
+        } else t
+    }
 
     // ---------- 読み込み ----------
 
@@ -90,7 +146,8 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
     suspend fun scan(progress: (Int) -> Unit): List<Track> = withContext(Dispatchers.IO) {
         val log = ArrayList<String>()
         unindexedUsbDirs = emptyList()
-        val previous = loadCache()?.filter { !it.fromMediaStore }?.associateBy { it.uri } ?: emptyMap()
+        val cachedAll = loadCache()?.associateBy { it.uri } ?: emptyMap()
+        val previous = cachedAll.filterValues { !it.fromMediaStore }
         val result = try {
             if (prefs.sourceMode == Prefs.MODE_FOLDER) {
                 val tree = prefs.treeUri?.let(Uri::parse)
@@ -110,7 +167,7 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                 }
             } else {
                 volumeReport(log)
-                val fromStore = scanMediaStore(log)
+                val fromStore = mergeCached(scanMediaStore(log), cachedAll)
                 val usbCount = fromStore.count { !it.folder.startsWith(MediaStore.VOLUME_EXTERNAL_PRIMARY + "/") }
                 if (usbCount > 0) {
                     fromStore
@@ -309,7 +366,8 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                         val displayName = c.str(iName)
                         val trackRaw = c.num(iTrack)
                         val disc = firstNumber(c.str(iDisc)).takeIf { it > 0 }
-                            ?: (trackRaw / 1000).takeIf { it > 0 } ?: 1
+                            ?: (trackRaw / 1000).takeIf { it > 0 }
+                            ?: discFromFolder(rel).takeIf { it > 0 } ?: 1
                         out += Track(
                             uri = ContentUris.withAppendedId(base, id).toString(),
                             title = c.str(iTitle).ifBlank { displayName.substringBeforeLast('.') },
@@ -323,6 +381,7 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                             folder = "$vol/$rel",
                             fromMediaStore = true,
                             lastModified = c.long(iModified),
+                            fileName = displayName,
                         )
                     }
                 }
@@ -414,28 +473,31 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
         try {
             r.setDataSource(context, Uri.parse(f.uri))
             fun k(key: Int): String = r.extractMetadata(key)?.trim().orEmpty()
-            return Track(
+            val base = Track(
                 uri = f.uri,
                 title = k(MediaMetadataRetriever.METADATA_KEY_TITLE).ifBlank { fallbackTitle },
                 artist = k(MediaMetadataRetriever.METADATA_KEY_ARTIST),
                 albumArtist = k(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST),
                 album = k(MediaMetadataRetriever.METADATA_KEY_ALBUM).ifBlank { folderName.ifBlank { UNKNOWN_ALBUM } },
                 trackNo = firstNumber(k(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)),
-                discNo = firstNumber(k(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER)).coerceAtLeast(1),
+                discNo = firstNumber(k(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER)).takeIf { it > 0 }
+                    ?: discFromFolder(f.folder).takeIf { it > 0 } ?: 1,
                 year = firstNumber(k(MediaMetadataRetriever.METADATA_KEY_YEAR)).let { if (it in 1..9999) it else 0 },
                 durationMs = k(MediaMetadataRetriever.METADATA_KEY_DURATION).toLongOrNull() ?: 0L,
                 folder = f.folder,
                 cover = cover,
                 fromMediaStore = false,
                 lastModified = f.lastModified,
+                fileName = f.name,
             )
+            return applyTags(base, TagReader.read(context, Uri.parse(f.uri)))
         } catch (e: Exception) {
             Log.w(TAG, "tag read failed: ${f.name}", e)
             return Track(
                 uri = f.uri, title = fallbackTitle, artist = "", albumArtist = "",
                 album = folderName.ifBlank { UNKNOWN_ALBUM }, trackNo = 0, discNo = 1, year = 0,
                 durationMs = 0L, folder = f.folder, cover = cover, fromMediaStore = false,
-                lastModified = f.lastModified,
+                lastModified = f.lastModified, fileName = f.name, tagsRead = true,
             )
         } finally {
             runCatching { r.release() }

@@ -9,17 +9,17 @@ class Library(val tracks: List<Track>) {
     private val artistMap: Map<String, Artist>
     private val uriMap: Map<String, Track> by lazy { tracks.associateBy { it.uri } }
 
-    private val artistNorm by lazy { artists.map { SortKey.searchNorm(it.name) } }
+    private val artistNorm by lazy { artists.map { SortKey.searchNorm(it.name + " " + it.sortName) } }
     private val albumNorm by lazy { albums.map { SortKey.searchNorm(it.title + " " + it.artist) } }
-    private val songNorm by lazy { songs.map { SortKey.searchNorm(it.title) } }
+    private val songNorm by lazy { songs.map { SortKey.searchNorm(it.title + " " + it.titleSort) } }
 
     init {
-        // アルバム内の曲順：ディスク番号 → トラック番号 → 曲名
+        // アルバム内の曲順：IDタグのディスク番号 → トラック番号。番号が無い曲はファイル名順
         val trackOrder = compareBy<Track>(
             { it.discNo },
             { if (it.trackNo > 0) it.trackNo else Int.MAX_VALUE },
-            { it.title },
-        )
+        ).thenComparator { a, b -> naturalCompare(a.fileName, b.fileName) }
+            .thenBy { it.title }
 
         val builtAlbums = tracks.groupBy { it.albumKey }.map { (key, list) ->
             val sorted = list.sortedWith(trackOrder)
@@ -32,9 +32,11 @@ class Library(val tracks: List<Track>) {
                 artist = artistName,
                 year = sorted.maxOf { it.year },
                 tracks = sorted,
+                sortTitle = sorted.firstOrNull { it.albumSort.isNotBlank() }?.albumSort
+                    ?: sorted.first().album.ifBlank { UNKNOWN_ALBUM },
             )
         }
-        albums = SortKey.sorted(builtAlbums) { it.title }
+        albums = SortKey.sorted(builtAlbums) { it.sortTitle }
         albumMap = albums.associateBy { it.key }
 
         val albumOrder = compareBy<Album>(
@@ -46,12 +48,13 @@ class Library(val tracks: List<Track>) {
                 .mapNotNull { albumMap[it] }
                 .sortedWith(albumOrder)
             val artistTracks = albs.flatMap { a -> a.tracks.filter { it.groupArtist == name } }
-            Artist(name, albs, artistTracks)
+            val reading = list.firstOrNull { it.groupArtistSort.isNotBlank() }?.groupArtistSort ?: name
+            Artist(name, reading, albs, artistTracks)
         }
-        artists = SortKey.sorted(builtArtists) { it.name }
+        artists = SortKey.sorted(builtArtists) { it.sortName }
         artistMap = artists.associateBy { it.name }
 
-        songs = SortKey.sorted(tracks) { it.title }
+        songs = SortKey.sorted(tracks) { it.sortTitle }
     }
 
     fun album(key: String): Album? = albumMap[key]
@@ -77,5 +80,36 @@ class Library(val tracks: List<Track>) {
             if (prefix.size >= limit) return prefix
         }
         return (prefix + contains).take(limit)
+    }
+
+    companion object {
+        /** "2 曲" < "10 曲" となる自然な並び */
+        fun naturalCompare(a: String, b: String): Int {
+            var i = 0
+            var j = 0
+            while (i < a.length && j < b.length) {
+                val ca = a[i]
+                val cb = b[j]
+                if (ca.isDigit() && cb.isDigit()) {
+                    var ei = i
+                    while (ei < a.length && a[ei].isDigit()) ei++
+                    var ej = j
+                    while (ej < b.length && b[ej].isDigit()) ej++
+                    val na = a.substring(i, ei).trimStart('0')
+                    val nb = b.substring(j, ej).trimStart('0')
+                    if (na.length != nb.length) return na.length - nb.length
+                    val c = na.compareTo(nb)
+                    if (c != 0) return c
+                    i = ei
+                    j = ej
+                } else {
+                    val c = ca.lowercaseChar().compareTo(cb.lowercaseChar())
+                    if (c != 0) return c
+                    i++
+                    j++
+                }
+            }
+            return (a.length - i) - (b.length - j)
+        }
     }
 }

@@ -23,7 +23,7 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("autoResume", v).apply()
 
     var visualizer: String
-        get() = sp.getString("visualizer", "neon") ?: "neon"
+        get() = sp.getString("visualizer", "blocks") ?: "blocks"
         set(v) = sp.edit().putString("visualizer", v).apply()
 
     companion object {

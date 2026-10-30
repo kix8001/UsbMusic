@@ -23,6 +23,10 @@ import kotlin.math.sqrt
 @OptIn(UnstableApi::class)
 object Spectrum : TeeAudioProcessor.AudioBufferSink {
     const val BANDS = 48
+    const val WAVE = 128
+
+    /** 1コマ分の解析結果：周波数ごとの強さ、左右の音量、波形 */
+    class Frame(val bands: FloatArray, val left: Float, val right: Float, val wave: FloatArray)
 
     private const val N = 2048
     private const val HOP = 1024
@@ -31,8 +35,8 @@ object Spectrum : TeeAudioProcessor.AudioBufferSink {
     private const val LATENCY_NS = 300_000_000L
 
     private val lock = Any()
-    private val queue = ArrayDeque<Pair<Long, FloatArray>>()
-    private var shown = FloatArray(BANDS)
+    private val queue = ArrayDeque<Pair<Long, Frame>>()
+    private var shown = Frame(FloatArray(BANDS), 0f, 0f, FloatArray(WAVE))
     private var lastTime = 0L
 
     // 以下は再生スレッドだけが触る
@@ -42,6 +46,8 @@ object Spectrum : TeeAudioProcessor.AudioBufferSink {
     private val ring = FloatArray(N)
     private var writePos = 0
     private var sinceLast = 0
+    private var sumL = 0.0
+    private var sumR = 0.0
     private val re = FloatArray(N)
     private val im = FloatArray(N)
     private val window = FloatArray(N) { (0.5 * (1 - cos(2 * PI * it / (N - 1)))).toFloat() }
@@ -56,6 +62,8 @@ object Spectrum : TeeAudioProcessor.AudioBufferSink {
         sampleRate = sampleRateHz.coerceAtLeast(8000)
         writePos = 0
         sinceLast = 0
+        sumL = 0.0
+        sumR = 0.0
         ring.fill(0f)
         computeEdges()
         synchronized(lock) { queue.clear() }
@@ -84,7 +92,12 @@ object Spectrum : TeeAudioProcessor.AudioBufferSink {
         val frameBytes = 2 * channels
         while (b.remaining() >= frameBytes) {
             var sum = 0f
-            for (c in 0 until channels) sum += b.short / 32768f
+            for (c in 0 until channels) {
+                val v = b.short / 32768f
+                sum += v
+                if (c == 0) sumL += v * v
+                if (c == 1 || channels == 1) sumR += v * v
+            }
             ring[writePos] = sum / channels
             writePos = (writePos + 1) % N
             if (++sinceLast >= HOP) {
@@ -111,9 +124,20 @@ object Spectrum : TeeAudioProcessor.AudioBufferSink {
             val db = 20f * log10((peak / ref).coerceAtLeast(1e-6f)) + tilt[band]
             out[band] = ((db + 62f) / 56f).coerceIn(0f, 1f)
         }
+        fun vu(sumSq: Double): Float {
+            val rms = sqrt(sumSq / HOP).toFloat()
+            val db = 20f * log10(rms.coerceAtLeast(1e-6f))
+            return ((db + 42f) / 42f).coerceIn(0f, 1f)
+        }
+        val l = vu(sumL)
+        val r = vu(sumR)
+        sumL = 0.0
+        sumR = 0.0
+        val step = HOP / WAVE
+        val wave = FloatArray(WAVE) { i -> ring[(writePos - HOP + i * step + N) % N] }
         val at = System.nanoTime() + LATENCY_NS
         synchronized(lock) {
-            queue.addLast(at to out)
+            queue.addLast(at to Frame(out, l, r, wave))
             while (queue.size > 64) queue.removeFirst()
         }
     }
@@ -158,7 +182,7 @@ object Spectrum : TeeAudioProcessor.AudioBufferSink {
     }
 
     /** いま鳴っている音のスペクトラム（0〜1）。音が止まっていれば null */
-    fun current(now: Long = System.nanoTime()): FloatArray? = synchronized(lock) {
+    fun current(now: Long = System.nanoTime()): Frame? = synchronized(lock) {
         var changed = false
         while (queue.isNotEmpty() && queue.first().first <= now) {
             val (t, v) = queue.removeFirst()

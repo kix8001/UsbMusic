@@ -70,12 +70,7 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         VisStyle.entries.forEach { st ->
             OptionRow(
                 title = st.label,
-                body = when (st) {
-                    VisStyle.OFF -> "表示しません"
-                    VisStyle.NEON -> "光るバーが中央から伸び、床に映り込むスタイル"
-                    VisStyle.LIGHTS -> "色が流れる電球が音に合わせて点灯します"
-                    VisStyle.RETRO -> "昔のLEDグラフィックイコライザー風"
-                },
+                body = st.desc,
                 selected = vm.visualizer == st,
             ) { vm.setVisualizerStyle(st) }
         }
@@ -85,9 +80,9 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         InfoRow(
             buildString {
                 append("${lib.tracks.size}曲・${lib.artists.size}アーティスト・${lib.albums.size}アルバム")
-                if (vm.scanning) append("（読み込み中")
-                if (vm.scanning && vm.scanProgress > 0) append(" ${vm.scanProgress}")
-                if (vm.scanning) append("）")
+                val tp = vm.tagProgress
+                if (tp != null) append("（IDタグを読み込み中 ${tp.first}/${tp.second}）")
+                else if (vm.scanning) append("（読み込み中）")
             }
         )
         InfoRow(
@@ -99,7 +94,7 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         ActionRow("アルバムアートを読み込み直す") { vm.clearArtCache() }
 
         SectionHeader("このアプリについて")
-        InfoRow("mTunes 0.2.0")
+        InfoRow("mTunes 0.3.0")
     }
 }
 

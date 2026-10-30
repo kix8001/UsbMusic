@@ -6,7 +6,11 @@ const val UNKNOWN_ARTIST = "不明なアーティスト"
 const val UNKNOWN_ALBUM = "不明なアルバム"
 const val VARIOUS_ARTISTS = "Various Artists"
 
-private val DISC_DIR = Regex("""^(cd|disc|disk|ディスク)[\s_\-]*\d+$""", RegexOption.IGNORE_CASE)
+private val DISC_DIR = Regex("""^(cd|disc|disk|ディスク)[\s_\-]*(\d+)$""", RegexOption.IGNORE_CASE)
+
+/** "CD2" のようなフォルダ名からディスク番号を推定（タグにディスク番号が無い時用） */
+fun discFromFolder(folder: String): Int =
+    DISC_DIR.matchEntire(folder.trimEnd('/').substringAfterLast('/'))?.groupValues?.get(2)?.toIntOrNull() ?: 0
 
 /** "Album/CD1" のようなディスク別フォルダは親フォルダを同じアルバムとして扱う */
 fun albumFolder(folder: String): String {
@@ -30,11 +34,30 @@ data class Track(
     val cover: String? = null,
     val fromMediaStore: Boolean = true,
     val lastModified: Long = 0L,
+    val fileName: String = "",
+    /** 並べ替え用の読み（IDタグの「並べ替え用」欄） */
+    val titleSort: String = "",
+    val artistSort: String = "",
+    val albumArtistSort: String = "",
+    val albumSort: String = "",
+    /** IDタグを自前で読み終えたか */
+    val tagsRead: Boolean = false,
 ) {
     val displayArtist: String get() = artist.ifBlank { UNKNOWN_ARTIST }
 
     /** アーティスト一覧でまとめる名前（アルバムアーティスト優先） */
     val groupArtist: String get() = albumArtist.ifBlank { displayArtist }
+
+    /** アーティストの並べ替えに使う読み（無ければ空） */
+    val groupArtistSort: String
+        get() = when {
+            albumArtist.isBlank() -> artistSort
+            albumArtistSort.isNotBlank() -> albumArtistSort
+            albumArtist == artist -> artistSort
+            else -> ""
+        }
+
+    val sortTitle: String get() = titleSort.ifBlank { title }
 
     /** 同じアルバムかどうかを判定するキー */
     val albumKey: String =
@@ -63,6 +86,7 @@ class Album(
     val artist: String,
     val year: Int,
     val tracks: List<Track>,
+    val sortTitle: String = title,
 ) {
     val cover: Track get() = tracks.first()
     val durationMs: Long get() = tracks.sumOf { it.durationMs }
@@ -70,6 +94,7 @@ class Album(
 
 class Artist(
     val name: String,
+    val sortName: String,
     val albums: List<Album>,
     val tracks: List<Track>,
 )

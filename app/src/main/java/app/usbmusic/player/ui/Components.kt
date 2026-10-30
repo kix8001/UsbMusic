@@ -318,12 +318,16 @@ private fun JumpRail(onUp: () -> Unit, onJump: () -> Unit, onDown: () -> Unit) {
     ) {
         RailButton(Icons.Filled.KeyboardArrowUp, onUp)
         Spacer(Modifier.weight(1f))
-        Box(
-            Modifier.size(width = 64.dp, height = 56.dp).clip(RoundedCornerShape(12.dp))
-                .background(Pal.Surface2).clickable(onClick = onJump),
-            contentAlignment = Alignment.Center,
+        // 縦書きの「あ・Z」
+        Column(
+            Modifier.width(56.dp).clip(RoundedCornerShape(14.dp))
+                .background(Pal.Surface2).clickable(onClick = onJump)
+                .padding(vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("あ・Z", color = Pal.Accent, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+            listOf("あ", "・", "Z").forEach {
+                Text(it, color = Pal.Accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp)
+            }
         }
         Spacer(Modifier.weight(1f))
         RailButton(Icons.Filled.KeyboardArrowDown, onDown)

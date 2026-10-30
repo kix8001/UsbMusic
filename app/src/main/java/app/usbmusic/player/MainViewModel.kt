@@ -18,6 +18,7 @@ import app.usbmusic.player.data.ArtLoader
 import app.usbmusic.player.data.Library
 import app.usbmusic.player.data.LibraryRepository
 import app.usbmusic.player.data.Prefs
+import app.usbmusic.player.ui.VisStyle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,6 +44,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var report by mutableStateOf<List<String>>(emptyList())
         private set
+
+    var visualizer by mutableStateOf(VisStyle.of(prefs.visualizer))
+        private set
+
+    fun setVisualizerStyle(style: VisStyle) {
+        visualizer = style
+        prefs.visualizer = style.id
+    }
+
+    /** 再生画面のビジュアライザーをタップした時、次のスタイルへ */
+    fun nextVisualizer() {
+        val list = VisStyle.cycle
+        setVisualizerStyle(list[(list.indexOf(visualizer) + 1) % list.size])
+    }
 
     var mediaScanRunning by mutableStateOf(false)
         private set

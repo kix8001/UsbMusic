@@ -1,4 +1,4 @@
-# USBミュージック（Androidナビ用 音楽プレーヤー）
+# mTunes（Androidナビ用 音楽プレーヤー）
 
 USBメモリ内の音楽を、CarPlayの「ミュージック」に近い操作感で再生するAndroidアプリです。
 対象：Android 10以上（PR-JM200 / Android 14 / 11.8インチ横長画面で使う想定）

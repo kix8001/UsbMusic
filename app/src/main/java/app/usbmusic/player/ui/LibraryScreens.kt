@@ -3,6 +3,7 @@ package app.usbmusic.player.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import app.usbmusic.player.MainViewModel
 import app.usbmusic.player.data.Album
@@ -48,6 +50,7 @@ private fun countText(albums: Int, tracks: Int): String =
 
 private fun yearOrEmpty(year: Int): String = if (year > 0) year.toString() else ""
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LibraryEmpty(vm: MainViewModel, onOpenSettings: () -> Unit) {
     if (vm.scanning || !vm.loaded) {
@@ -76,12 +79,14 @@ fun LibraryEmpty(vm: MainViewModel, onOpenSettings: () -> Unit) {
                 }
                 Spacer(Modifier.height(16.dp))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 PillButton(Icons.Filled.Refresh, "再読み込み") { vm.rescan() }
                 PillButton(Icons.Filled.Usb, "USBを登録し直す") { vm.requestMediaScan() }
                 PillButton(Icons.Filled.Settings, "設定を開く", onOpenSettings)
             }
-            DiagnosticsBlock(vm.report)
         }
     }
 }
@@ -193,65 +198,90 @@ fun AlbumDetailScreen(
 }
 
 @Composable
-private fun AlbumDetailBody(lib: Library, album: Album, conn: PlayerConnection, onArtist: (String) -> Unit) {
-    val multiDisc = remember(album) { album.tracks.map { it.discNo }.distinct().size > 1 }
-    val showTrackArtist = album.artist == VARIOUS_ARTISTS ||
-        album.tracks.any { it.displayArtist != album.artist }
+private fun AlbumHeader(lib: Library, album: Album, conn: PlayerConnection, onArtist: (String) -> Unit) {
     val artistExists = lib.artist(album.artist) != null
     val meta = listOf(
         yearOrEmpty(album.year),
         "${album.tracks.size}曲",
         fmtTime(album.durationMs),
     ).filter { it.isNotEmpty() }.joinToString("・")
+    Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+        Text(
+            album.title, color = Pal.Text, fontSize = 28.sp, fontWeight = FontWeight.Bold,
+            maxLines = 2, overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            album.artist,
+            color = Pal.Accent,
+            fontSize = 20.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = if (artistExists) Modifier.clickable { onArtist(album.artist) } else Modifier,
+        )
+        Text(meta, color = Pal.Sub, fontSize = 15.sp)
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PillButton(Icons.Filled.PlayArrow, "再生") { conn.playTracks(album.tracks) }
+            PillButton(Icons.Filled.Shuffle, "シャッフル") { conn.playTracks(album.tracks, shuffled = true) }
+        }
+    }
+}
+
+@Composable
+private fun AlbumDetailBody(lib: Library, album: Album, conn: PlayerConnection, onArtist: (String) -> Unit) {
+    val multiDisc = remember(album) { album.tracks.map { it.discNo }.distinct().size > 1 }
+    val showTrackArtist = album.artist == VARIOUS_ARTISTS ||
+        album.tracks.any { it.displayArtist != album.artist }
     val currentId = conn.current?.mediaId
 
-    Row(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Column(
-            Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState())
-                .padding(end = 24.dp, bottom = 24.dp)
-        ) {
-            AlbumArt(album.cover, 276.dp, corner = 10.dp)
-            Spacer(Modifier.height(14.dp))
-            Text(
-                album.title, color = Pal.Text, fontSize = 24.sp, fontWeight = FontWeight.Bold,
-                maxLines = 3, overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                album.artist,
-                color = Pal.Accent,
-                fontSize = 19.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = if (artistExists) Modifier.clickable { onArtist(album.artist) } else Modifier,
-            )
-            Text(meta, color = Pal.Sub, fontSize = 15.sp)
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PillButton(Icons.Filled.PlayArrow, "再生") { conn.playTracks(album.tracks) }
-                PillButton(Icons.Filled.Shuffle, "シャッフル") { conn.playTracks(album.tracks, shuffled = true) }
+    val trackItems: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+        album.tracks.forEachIndexed { i, t ->
+            if (multiDisc && (i == 0 || album.tracks[i - 1].discNo != t.discNo)) {
+                item {
+                    Text(
+                        "ディスク ${t.discNo}",
+                        color = Pal.Sub,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 12.dp, top = 16.dp, bottom = 4.dp),
+                    )
+                }
+            }
+            item {
+                TrackRow(
+                    number = if (t.trackNo > 0) t.trackNo.toString() else "${i + 1}",
+                    title = t.title,
+                    subtitle = if (showTrackArtist) t.displayArtist else null,
+                    durationMs = t.durationMs,
+                    playing = currentId == t.uri,
+                ) { conn.playTracks(album.tracks, i) }
             }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxHeight(), contentPadding = PaddingValues(bottom = 24.dp)) {
-            album.tracks.forEachIndexed { i, t ->
-                if (multiDisc && (i == 0 || album.tracks[i - 1].discNo != t.discNo)) {
-                    item {
-                        Text(
-                            "ディスク ${t.discNo}",
-                            color = Pal.Sub,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = 12.dp, top = 16.dp, bottom = 4.dp),
-                        )
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        if (maxWidth < 600.dp) {
+            // 縦長：アート → 情報 → 曲
+            val art = min(maxWidth - 40.dp, 420.dp)
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 24.dp)) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(bottom = 16.dp), contentAlignment = Alignment.Center) {
+                        AlbumArt(album.cover, art, corner = 10.dp)
                     }
                 }
-                item {
-                    TrackRow(
-                        number = if (t.trackNo > 0) t.trackNo.toString() else "${i + 1}",
-                        title = t.title,
-                        subtitle = if (showTrackArtist) t.displayArtist else null,
-                        durationMs = t.durationMs,
-                        playing = currentId == t.uri,
-                    ) { conn.playTracks(album.tracks, i) }
+                item { AlbumHeader(lib, album, conn, onArtist) }
+                trackItems()
+            }
+        } else {
+            // 横長：左にアートを大きく（横幅の約半分）、右に情報と曲
+            Row(Modifier.fillMaxSize().padding(start = 20.dp, end = 12.dp, bottom = 12.dp)) {
+                BoxWithConstraints(Modifier.weight(0.47f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                    AlbumArt(album.cover, min(maxWidth, maxHeight), corner = 12.dp)
+                }
+                Spacer(Modifier.width(24.dp))
+                LazyColumn(Modifier.weight(0.53f).fillMaxHeight(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                    item { AlbumHeader(lib, album, conn, onArtist) }
+                    trackItems()
                 }
             }
         }
@@ -380,15 +410,3 @@ fun SearchScreen(
     }
 }
 
-@Composable
-fun DiagnosticsBlock(lines: List<String>) {
-    if (lines.isEmpty()) return
-    Column(
-        Modifier.fillMaxWidth().padding(top = 24.dp)
-            .background(Pal.Surface, RoundedCornerShape(12.dp)).padding(16.dp)
-    ) {
-        Text("診断情報", color = Pal.Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(6.dp))
-        lines.forEach { Text(it, color = Pal.Sub, fontSize = 14.sp) }
-    }
-}

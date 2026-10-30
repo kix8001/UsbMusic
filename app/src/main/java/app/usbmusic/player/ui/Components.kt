@@ -4,7 +4,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -14,11 +13,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,7 +31,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -230,7 +232,10 @@ fun PillButton(icon: ImageVector, text: String, onClick: () -> Unit) {
     ) {
         Icon(icon, contentDescription = null, tint = Pal.Accent, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(8.dp))
-        Text(text, color = Pal.Accent, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            text, color = Pal.Accent, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, softWrap = false,
+        )
     }
 }
 
@@ -263,55 +268,79 @@ fun AlbumTile(album: Album, subtitle: String, onClick: () -> Unit) {
     }
 }
 
-/** 右端の索引（A〜Z・あ〜わ）。タップ・なぞりでその位置へジャンプ */
+/** CarPlayと同じ「あ・Z」ジャンプ：押すと文字の一覧を出し、選んだ文字の位置へ移動 */
 @Composable
-fun IndexBar(letters: List<String>, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
-    var heightPx by remember { mutableIntStateOf(1) }
-    var last by remember { mutableStateOf<String?>(null) }
-    val currentLetters by rememberUpdatedState(letters)
-    val select by rememberUpdatedState(onSelect)
-
-    fun pick(y: Float) {
-        val ls = currentLetters
-        if (ls.isEmpty()) return
-        val i = ((y / heightPx) * ls.size).toInt().coerceIn(0, ls.lastIndex)
-        if (ls[i] != last) {
-            last = ls[i]
-            select(ls[i])
-        }
-    }
-
-    BoxWithConstraints(modifier.width(32.dp).fillMaxHeight().padding(vertical = 6.dp)) {
-        val per = maxHeight / letters.size.coerceAtLeast(1)
-        val fontSize = (per.value * 0.72f).coerceIn(7f, 14f).sp
-        Column(
-            Modifier.fillMaxSize()
-                .onSizeChanged { heightPx = it.height.coerceAtLeast(1) }
-                .pointerInput(Unit) {
-                    detectTapGestures(onPress = { offset ->
-                        pick(offset.y)
-                        tryAwaitRelease()
-                        last = null
-                    })
+fun JumpGrid(letters: List<String>, onSelect: (String) -> Unit, onClose: () -> Unit) {
+    val cols = 7
+    val rows = letters.chunked(cols)
+    Column(
+        Modifier.fillMaxSize().background(Pal.Bg).padding(horizontal = 24.dp, vertical = 16.dp)
+            .pointerInput(Unit) { detectTapGestures { } },
+    ) {
+        Column(Modifier.weight(1f).fillMaxWidth()) {
+            rows.forEach { row ->
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    row.forEach { letter ->
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().padding(4.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Pal.Surface)
+                                .clickable { onSelect(letter) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(letter, color = Pal.Text, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onDragStart = { offset -> pick(offset.y) },
-                        onDragEnd = { last = null },
-                        onDragCancel = { last = null },
-                    ) { change, _ -> pick(change.position.y) }
-                },
-            verticalArrangement = Arrangement.SpaceEvenly,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            letters.forEach {
-                Text(it, color = Pal.Accent, fontSize = fontSize, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+            // 行数が少ない時にマスが縦に伸びすぎないように
+            repeat((5 - rows.size).coerceAtLeast(0)) { Spacer(Modifier.weight(1f)) }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Box(
+                Modifier.height(56.dp).clip(RoundedCornerShape(12.dp)).background(Pal.Surface2)
+                    .clickable(onClick = onClose).padding(horizontal = 32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("完了", color = Pal.Accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
 }
 
-/** 索引付きのリスト（アーティスト・曲の一覧で使用） */
+/** 一覧の左に置く操作列：▲（前のページ）／あ・Z／▼（次のページ） */
+@Composable
+private fun JumpRail(onUp: () -> Unit, onJump: () -> Unit, onDown: () -> Unit) {
+    Column(
+        Modifier.width(76.dp).fillMaxHeight().padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        RailButton(Icons.Filled.KeyboardArrowUp, onUp)
+        Spacer(Modifier.weight(1f))
+        Box(
+            Modifier.size(width = 64.dp, height = 56.dp).clip(RoundedCornerShape(12.dp))
+                .background(Pal.Surface2).clickable(onClick = onJump),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("あ・Z", color = Pal.Accent, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+        }
+        Spacer(Modifier.weight(1f))
+        RailButton(Icons.Filled.KeyboardArrowDown, onDown)
+    }
+}
+
+@Composable
+private fun RailButton(icon: ImageVector, onClick: () -> Unit) {
+    Box(
+        Modifier.size(64.dp).clip(CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = Pal.Sub, modifier = Modifier.size(44.dp))
+    }
+}
+
+/** 文字ジャンプ付きのリスト（アーティスト・曲の一覧で使用） */
 @Composable
 fun <T> IndexedList(
     list: List<T>,
@@ -329,20 +358,40 @@ fun <T> IndexedList(
         m
     }
     val scope = rememberCoroutineScope()
-    val showIndex = groups.size > 1
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = state,
-            modifier = Modifier.fillMaxSize().padding(end = if (showIndex) 32.dp else 0.dp),
-            contentPadding = PaddingValues(bottom = 16.dp),
-        ) {
-            item { header() }
-            items(list.size) { i -> row(i, list[i]) }
+    var showJump by rememberSaveable { mutableStateOf(false) }
+
+    fun page(dir: Int) {
+        scope.launch {
+            val visible = (state.layoutInfo.visibleItemsInfo.size - 1).coerceAtLeast(1)
+            val target = (state.firstVisibleItemIndex + dir * visible).coerceIn(0, list.size)
+            state.animateScrollToItem(target)
         }
-        if (showIndex) {
-            IndexBar(groups.keys.toList(), Modifier.align(Alignment.CenterEnd)) { g ->
-                scope.launch { state.scrollToItem((groups[g] ?: 0) + 1) }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxSize()) {
+            if (groups.size > 1) {
+                JumpRail(onUp = { page(-1) }, onJump = { showJump = true }, onDown = { page(1) })
             }
+            LazyColumn(
+                state = state,
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                contentPadding = PaddingValues(bottom = 16.dp),
+            ) {
+                item { header() }
+                items(list.size) { i -> row(i, list[i]) }
+            }
+        }
+        if (showJump) {
+            BackHandler { showJump = false }
+            JumpGrid(
+                letters = groups.keys.toList(),
+                onSelect = { g ->
+                    showJump = false
+                    scope.launch { state.scrollToItem((groups[g] ?: 0) + 1) }
+                },
+                onClose = { showJump = false },
+            )
         }
     }
 }

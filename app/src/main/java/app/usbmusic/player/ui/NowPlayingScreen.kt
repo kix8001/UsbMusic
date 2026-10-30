@@ -44,6 +44,8 @@ import kotlinx.coroutines.delay
 fun NowPlayingScreen(
     conn: PlayerConnection,
     lib: Library,
+    visStyle: VisStyle,
+    onVisTap: () -> Unit,
     onArtist: (String) -> Unit,
     onAlbum: (String) -> Unit,
 ) {
@@ -55,19 +57,46 @@ fun NowPlayingScreen(
     val track = remember(item.mediaId, lib) { lib.byUri(item.mediaId) ?: Track.fromItem(item) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
 
-    Row(
-        Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-            AlbumArt(track, min(maxWidth, maxHeight), corner = 12.dp)
-        }
-        Spacer(Modifier.width(40.dp))
-        Box(Modifier.weight(1.15f).fillMaxHeight()) {
-            if (showQueue) {
-                QueuePanel(conn, lib) { showQueue = false }
-            } else {
-                PlayerPanel(conn, track, lib, onArtist, onAlbum) { showQueue = true }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val narrow = maxWidth < 600.dp || maxHeight > maxWidth
+        if (narrow) {
+            // 縦長（分割表示）：アートを横幅いっぱいに、その下に情報と操作
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                if (showQueue) {
+                    QueuePanel(conn, lib) { showQueue = false }
+                } else {
+                    val art = min(maxWidth - 40.dp, maxHeight * 0.5f)
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        AlbumArt(track, art, corner = 12.dp)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    PlayerPanel(
+                        conn, track, lib, visStyle, onVisTap, onArtist, onAlbum,
+                        compact = true,
+                        modifier = Modifier.weight(1f),
+                    ) { showQueue = true }
+                }
+            }
+        } else {
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    AlbumArt(track, min(maxWidth, maxHeight), corner = 12.dp)
+                }
+                Spacer(Modifier.width(36.dp))
+                Box(Modifier.weight(1.15f).fillMaxHeight()) {
+                    if (showQueue) {
+                        QueuePanel(conn, lib) { showQueue = false }
+                    } else {
+                        PlayerPanel(
+                            conn, track, lib, visStyle, onVisTap, onArtist, onAlbum,
+                            compact = false,
+                            modifier = Modifier.fillMaxSize(),
+                        ) { showQueue = true }
+                    }
+                }
             }
         }
     }
@@ -78,8 +107,12 @@ private fun PlayerPanel(
     conn: PlayerConnection,
     track: Track,
     lib: Library,
+    visStyle: VisStyle,
+    onVisTap: () -> Unit,
     onArtist: (String) -> Unit,
     onAlbum: (String) -> Unit,
+    compact: Boolean,
+    modifier: Modifier,
     onQueue: () -> Unit,
 ) {
     var position by remember { mutableLongStateOf(conn.position) }
@@ -93,25 +126,30 @@ private fun PlayerPanel(
     val duration = conn.duration.takeIf { it > 0 } ?: track.durationMs
     val artistTarget = lib.artist(track.groupArtist)?.name
     val albumTarget = lib.album(track.albumKey)?.key
+    val showVis = visStyle != VisStyle.OFF
 
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+    Column(
+        modifier,
+        verticalArrangement = if (showVis) Arrangement.Top else Arrangement.Center,
+    ) {
+        if (showVis && !compact) Spacer(Modifier.height(8.dp))
         Text(
             track.title.ifBlank { "—" },
-            color = Pal.Text, fontSize = 30.sp, fontWeight = FontWeight.Bold,
-            maxLines = 2, overflow = TextOverflow.Ellipsis,
+            color = Pal.Text, fontSize = if (compact) 24.sp else 28.sp, fontWeight = FontWeight.Bold,
+            maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             track.displayArtist,
-            color = Pal.Accent, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            color = Pal.Accent, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = if (artistTarget != null) Modifier.clickable { onArtist(artistTarget) } else Modifier,
         )
         Text(
             track.album,
-            color = Pal.Sub, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            color = Pal.Sub, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = if (albumTarget != null) Modifier.clickable { onAlbum(albumTarget) } else Modifier,
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(12.dp))
 
         val fraction = dragging ?: if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
         Slider(
@@ -129,29 +167,40 @@ private fun PlayerPanel(
         )
         val shown = dragging?.let { (it * duration).toLong() } ?: position
         Row(Modifier.fillMaxWidth()) {
-            Text(fmtTime(shown), color = Pal.Sub, fontSize = 15.sp)
+            Text(fmtTime(shown), color = Pal.Sub, fontSize = 14.sp)
             Spacer(Modifier.weight(1f))
-            Text("-" + fmtTime((duration - shown).coerceAtLeast(0)), color = Pal.Sub, fontSize = 15.sp)
+            Text("-" + fmtTime((duration - shown).coerceAtLeast(0)), color = Pal.Sub, fontSize = 14.sp)
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
 
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BigButton(Icons.Filled.SkipPrevious, 76.dp) { conn.previous() }
-            BigButton(if (conn.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, 100.dp) { conn.toggle() }
-            BigButton(Icons.Filled.SkipNext, 76.dp) { conn.next() }
-        }
-        Spacer(Modifier.height(16.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            ToggleIcon(Icons.Filled.Shuffle, conn.shuffle) { conn.toggleShuffle() }
+            val skip = if (compact) 58.dp else 72.dp
+            val play = if (compact) 74.dp else 92.dp
+            val tog = if (compact) 44.dp else 56.dp
+            ToggleIcon(Icons.Filled.Shuffle, conn.shuffle, tog) { conn.toggleShuffle() }
+            BigButton(Icons.Filled.SkipPrevious, skip) { conn.previous() }
+            BigButton(if (conn.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, play) { conn.toggle() }
+            BigButton(Icons.Filled.SkipNext, skip) { conn.next() }
             ToggleIcon(
                 if (conn.repeat == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
                 conn.repeat != Player.REPEAT_MODE_OFF,
+                tog,
             ) { conn.cycleRepeat() }
-            ToggleIcon(Icons.Filled.QueueMusic, false) { onQueue() }
+            ToggleIcon(Icons.Filled.QueueMusic, false, tog) { onQueue() }
+        }
+
+        if (showVis) {
+            Spacer(Modifier.height(12.dp))
+            Visualizer(
+                style = visStyle,
+                playing = conn.isPlaying,
+                modifier = Modifier.fillMaxWidth().weight(1f).heightIn(min = 48.dp),
+                onTap = onVisTap,
+            )
         }
     }
 }
@@ -195,13 +244,13 @@ private fun BigButton(icon: ImageVector, size: Dp, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ToggleIcon(icon: ImageVector, active: Boolean, onClick: () -> Unit) {
+private fun ToggleIcon(icon: ImageVector, active: Boolean, size: Dp, onClick: () -> Unit) {
     Box(
-        Modifier.size(64.dp).clip(RoundedCornerShape(12.dp))
+        Modifier.size(size).clip(RoundedCornerShape(12.dp))
             .background(if (active) Pal.Surface2 else Color.Transparent)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = if (active) Pal.Accent else Pal.Sub, modifier = Modifier.size(34.dp))
+        Icon(icon, contentDescription = null, tint = if (active) Pal.Accent else Pal.Sub, modifier = Modifier.size(size * 0.55f))
     }
 }

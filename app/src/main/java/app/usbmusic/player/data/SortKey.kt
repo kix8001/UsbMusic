@@ -10,9 +10,10 @@ import java.util.Locale
  * 全角/半角・カタカナ/ひらがなを揃え、英語名の先頭 "The " は無視する（CarPlayと同じ）。
  */
 object SortKey {
+    /** 並び順：あ〜わ → 漢字 → A〜Z → 記号・数字（iPhoneの日本語表示と同じ） */
     val GROUPS: List<String> =
-        ('A'..'Z').map { it.toString() } +
-            listOf("あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ", "漢", "#")
+        listOf("あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ", "漢") +
+            ('A'..'Z').map { it.toString() } + listOf("#")
 
     private val KANA_ROW: Map<Char, String> = buildMap {
         val rows = listOf(

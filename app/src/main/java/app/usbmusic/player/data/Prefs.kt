@@ -22,6 +22,10 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("autoResume", true)
         set(v) = sp.edit().putBoolean("autoResume", v).apply()
 
+    var visualizer: String
+        get() = sp.getString("visualizer", "neon") ?: "neon"
+        set(v) = sp.edit().putString("visualizer", v).apply()
+
     companion object {
         const val MODE_AUTO = "auto"
         const val MODE_FOLDER = "folder"

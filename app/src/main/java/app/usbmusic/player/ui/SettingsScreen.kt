@@ -66,6 +66,21 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
             vm.prefs.autoResume = it
         }
 
+        SectionHeader("ビジュアライザー（再生中画面）")
+        VisStyle.entries.forEach { st ->
+            OptionRow(
+                title = st.label,
+                body = when (st) {
+                    VisStyle.OFF -> "表示しません"
+                    VisStyle.NEON -> "光るバーが中央から伸び、床に映り込むスタイル"
+                    VisStyle.LIGHTS -> "色が流れる電球が音に合わせて点灯します"
+                    VisStyle.RETRO -> "昔のLEDグラフィックイコライザー風"
+                },
+                selected = vm.visualizer == st,
+            ) { vm.setVisualizerStyle(st) }
+        }
+        InfoRow("再生中画面のビジュアライザーをタップしても切り替えられます。")
+
         SectionHeader("ライブラリ")
         InfoRow(
             buildString {
@@ -82,10 +97,9 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         ActionRow("ライブラリを再読み込み") { vm.rescan() }
         ActionRow(if (vm.mediaScanRunning) "USBを登録中…" else "AndroidにUSBの曲を登録し直してもらう") { vm.requestMediaScan() }
         ActionRow("アルバムアートを読み込み直す") { vm.clearArtCache() }
-        Box(Modifier.padding(horizontal = 20.dp)) { DiagnosticsBlock(vm.report) }
 
         SectionHeader("このアプリについて")
-        InfoRow("USBミュージック 0.1.3")
+        InfoRow("mTunes 0.2.0")
     }
 }
 

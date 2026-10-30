@@ -112,27 +112,58 @@ private fun MainLayout(vm: MainViewModel, conn: PlayerConnection, onPickFolder: 
 
     BackHandler(enabled = stack.size > 1) { pop() }
 
-    Row(Modifier.fillMaxSize()) {
-        Sidebar(tab) { t ->
-            if (t == tab) stacks[t] = listOf(t.root) else tab = t
-        }
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                holder.SaveableStateProvider(screen.key) {
-                    ScreenContent(
-                        screen = screen,
-                        vm = vm,
-                        lib = lib,
-                        conn = conn,
-                        push = push,
-                        pop = pop,
-                        open = open,
-                        onPickFolder = onPickFolder,
-                    )
-                }
+    val selectTab: (NavTab) -> Unit = { t ->
+        if (t == tab) stacks[t] = listOf(t.root) else tab = t
+    }
+    val content: @Composable ColumnScope.() -> Unit = {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            holder.SaveableStateProvider(screen.key) {
+                ScreenContent(
+                    screen = screen,
+                    vm = vm,
+                    lib = lib,
+                    conn = conn,
+                    push = push,
+                    pop = pop,
+                    open = open,
+                    onPickFolder = onPickFolder,
+                )
             }
-            if (conn.current != null && screen != Screen.NowPlaying) {
-                MiniPlayer(conn, lib) { open(NavTab.NOW, null) }
+        }
+        if (conn.current != null && screen != Screen.NowPlaying) {
+            MiniPlayer(conn, lib) { open(NavTab.NOW, null) }
+        }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        if (maxWidth < 600.dp) {
+            // 縦長（分割表示）：メニューを下に置き、画面の横幅をすべて使う
+            Column(Modifier.fillMaxSize()) {
+                content()
+                BottomBar(tab, selectTab)
+            }
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                Sidebar(tab, selectTab)
+                Column(Modifier.weight(1f).fillMaxHeight()) { content() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomBar(current: NavTab, onSelect: (NavTab) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(68.dp).background(Pal.Surface)) {
+        NavTab.entries.forEach { t ->
+            val selected = t == current
+            val tint = if (selected) Pal.Accent else Pal.Sub
+            Column(
+                Modifier.weight(1f).fillMaxHeight().clickable { onSelect(t) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(t.icon, contentDescription = t.label, tint = tint, modifier = Modifier.size(28.dp))
+                Text(t.label, color = tint, fontSize = 10.sp, maxLines = 1, softWrap = false)
             }
         }
     }
@@ -159,6 +190,8 @@ private fun ScreenContent(
         Screen.NowPlaying -> NowPlayingScreen(
             conn = conn,
             lib = lib,
+            visStyle = vm.visualizer,
+            onVisTap = { vm.nextVisualizer() },
             onArtist = { open(NavTab.ARTISTS, Screen.ArtistDetail(it)) },
             onAlbum = { open(NavTab.ALBUMS, Screen.AlbumDetail(it)) },
         )
@@ -205,7 +238,7 @@ private fun Sidebar(current: NavTab, onSelect: (NavTab) -> Unit) {
                 Icon(t.icon, contentDescription = t.label, tint = tint, modifier = Modifier.size(34.dp))
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    t.label, color = tint, fontSize = 13.sp, maxLines = 1,
+                    t.label, color = tint, fontSize = 13.sp, maxLines = 1, softWrap = false,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 )
             }

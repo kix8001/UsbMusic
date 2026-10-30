@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.nativeCanvas
@@ -53,10 +54,10 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     RETRO_LR_CENTER("retro_lr_center", "レトロLR センター", "中央から左（L）と右（R）へLEDが伸びます"),
     WAVE("wave", "レインボーウェーブ", "音の波が奥から手前へ流れる立体スペクトラム"),
     CIRCLE("circle", "サークル", "円形に広がるスペクトラムと波形"),
-    RIBBON("ribbon", "ライトリボン", "光の帯がうねり、粒子がきらめきます"),
     WARP("warp", "ワープ", "光の筋が中心から飛び出す、ワープ空間"),
     LIGHTS("lights", "イルミネーション", "色が流れる電球が音に合わせて点灯します"),
     RIPPLE("ripple", "波紋", "しずくが落ちて波紋が広がり、重なって消えていきます"),
+    RIPPLE_TOP("ripple_top", "カラー波紋", "真上から見た水面に、色とりどりの波紋が広がります"),
     FLICKER("flicker", "ゆらぐ電灯", "古い電球がチラついたり、消えかけたりします"),
     ;
 
@@ -144,8 +145,6 @@ private class Meter {
     }
 
     // ライトリボン・ワープ・電灯で使う動きの状態
-    class Particle(var x: Float, var y: Float, var vx: Float, var vy: Float, var r: Float, var phase: Float)
-    val particles = ArrayList<Particle>()
 
     class Streak(var angle: Float, var z: Float, var len: Float, var hue: Float)
     val streaks = ArrayList<Streak>()
@@ -218,9 +217,9 @@ fun Visualizer(
                 VisStyle.RETRO_LR_CENTER -> drawRetroLRCenter(meter)
                 VisStyle.VU -> drawVu(meter)
                 VisStyle.RIPPLE -> drawRipple(meter, t)
+                VisStyle.RIPPLE_TOP -> drawRippleTop(meter, t)
                 VisStyle.WAVE -> drawWave(meter)
                 VisStyle.CIRCLE -> drawCircleVis(meter, t)
-                VisStyle.RIBBON -> drawRibbon(meter, t)
                 VisStyle.WARP -> drawWarp(meter, t)
                 VisStyle.LIGHTS -> drawLights(meter, t)
                 VisStyle.FLICKER -> drawFlicker(meter, t)
@@ -455,53 +454,6 @@ private fun DrawScope.drawCircleVis(m: Meter, t: Float) {
     drawPath(path, Color.White.copy(alpha = 0.9f), style = Stroke(width = 2f))
 }
 
-// ---------------- ライトリボン（光の帯と粒子） ----------------
-
-private fun DrawScope.drawRibbon(m: Meter, t: Float) {
-    drawRect(Brush.radialGradient(listOf(Color(0xFF1A1030), Color.Black), center = center, radius = size.width * 0.7f))
-    val fx = size.width * (0.5f + 0.18f * sin(t * 0.13f))
-    val fy = size.height * (0.5f + 0.15f * sin(t * 0.21f))
-    val colors = listOf(Color(0xFFBFF6FF), Color(0xFFE3C8FF), Color(0xFF8FD8FF), Color.White, Color(0xFFD9A8FF), Color(0xFF9FE8FF), Color(0xFFF0E0FF))
-    val bands = floatArrayOf(m.bass, m.energy, m.treble * 1.6f)
-    for (s in colors.indices) {
-        val amp = size.height * (0.25f + 0.9f * bands[s % 3]).coerceAtMost(1.3f)
-        val freq = 1.4f + s * 0.37f
-        val speed = 0.5f + s * 0.17f
-        val phase = s * 1.3f
-        val path = Path()
-        val steps = 70
-        for (i in 0..steps) {
-            val u = i / steps.toFloat()
-            val x = size.width * u
-            // 焦点に近いほど帯が集まる
-            val d = (abs(x - fx) / size.width).coerceIn(0f, 1f)
-            val env = 0.08f + d * 1.4f
-            val y = fy + amp * env * sin(u * freq * 2 * PI.toFloat() + t * speed + phase) * 0.5f
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        drawPath(path, colors[s], alpha = 0.12f, style = Stroke(width = 10f, cap = StrokeCap.Round))
-        drawPath(path, colors[s], alpha = 0.8f, style = Stroke(width = 1.6f, cap = StrokeCap.Round))
-    }
-    // 焦点の光
-    val glow = size.height * (0.35f + 0.5f * m.bass)
-    drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = 0.85f), Color(0x66C8A0FF), Color.Transparent), center = Offset(fx, fy), radius = glow), glow, Offset(fx, fy))
-    // 粒子（ぼけた光）
-    if (m.particles.isEmpty()) repeat(36) {
-        m.particles += Meter.Particle(
-            m.rnd.nextFloat(), m.rnd.nextFloat(),
-            (m.rnd.nextFloat() - 0.5f) * 0.03f, (m.rnd.nextFloat() - 0.5f) * 0.03f,
-            2f + m.rnd.nextFloat() * 7f, m.rnd.nextFloat() * 6.28f,
-        )
-    }
-    for (p in m.particles) {
-        p.x = (p.x + p.vx * m.dt * (1f + m.energy * 4f) + 1f) % 1f
-        p.y = (p.y + p.vy * m.dt * (1f + m.energy * 4f) + 1f) % 1f
-        val tw = 0.35f + 0.65f * (0.5f + 0.5f * sin(t * 2.5f + p.phase)) * (0.5f + m.treble * 1.5f).coerceAtMost(1f)
-        val c = Offset(p.x * size.width, p.y * size.height)
-        drawCircle(Brush.radialGradient(listOf(Color(0xFFE6D6FF).copy(alpha = 0.7f * tw), Color.Transparent), center = c, radius = p.r * 2.5f), p.r * 2.5f, c)
-    }
-}
-
 // ---------------- ワープ（中心から飛び出す光の筋） ----------------
 
 private fun DrawScope.drawWarp(m: Meter, t: Float) {
@@ -649,53 +601,6 @@ private fun DrawScope.drawFlicker(m: Meter, t: Float) {
     }
 }
 
-// ---------------- レトロLR センター（中央から左右へ） ----------------
-
-private fun DrawScope.drawRetroLRCenter(m: Meter) {
-    drawRect(Color(0xFF0D0F0D))
-    val segs = 22
-    val cx = size.width / 2
-    val gap = 6f
-    val labelW = size.height * 0.32f
-    val half = cx - gap - labelW
-    val segW = half / segs
-    val rowH = size.height * 0.46f
-    val top = size.height * 0.1f
-    label("L", labelW / 2, top + rowH * 0.8f, LedGreen.copy(alpha = 0.9f), rowH * 0.85f)
-    label("R", size.width - labelW / 2, top + rowH * 0.8f, LedGreen.copy(alpha = 0.9f), rowH * 0.85f)
-    for (c in 0..1) {
-        val lit = (m.lr[c] * segs).toInt()
-        val pk = (m.lrPeak[c] * segs).toInt().coerceAtMost(segs - 1)
-        for (s in 0 until segs) {
-            val color = when {
-                s >= segs - 3 -> LedRed
-                s >= segs - 7 -> LedYellow
-                else -> LedGreen
-            }
-            val w = segW * 0.74f
-            // L は中央から左へ、R は中央から右へ
-            val x = if (c == 0) cx - gap - segW * (s + 1) + segW * 0.13f else cx + gap + segW * s + segW * 0.13f
-            val on = s < lit || (s == pk && m.lrPeak[c] > 0.03f)
-            if (on) {
-                drawRect(color.copy(alpha = 0.25f), Offset(x - 2f, top - 2f), Size(w + 4f, rowH + 4f))
-                drawRect(color, Offset(x, top), Size(w, rowH))
-            } else {
-                drawRect(color.copy(alpha = 0.08f), Offset(x, top), Size(w, rowH))
-            }
-        }
-    }
-    drawLine(Color(0xFF2E3A2E), Offset(cx, top - 4f), Offset(cx, top + rowH + 4f), strokeWidth = 2f)
-    // 目盛り
-    val marks = listOf(-40 to 0f, -20 to 0.5238f, -10 to 0.7619f, -3 to 0.9286f, 0 to 1f)
-    val y = top + rowH + size.height * 0.28f
-    for ((db, f) in marks) {
-        val text = if (db == 0) "0" else db.toString()
-        val dx = half * f
-        label(text, cx - gap - dx, y, Color(0xFF7A8A7A), size.height * 0.13f, bold = false)
-        label(text, cx + gap + dx, y, Color(0xFF7A8A7A), size.height * 0.13f, bold = false)
-    }
-}
-
 // ---------------- 波紋（しずくが落ちて広がる） ----------------
 
 private fun DrawScope.drawRipple(m: Meter, t: Float) {
@@ -784,6 +689,125 @@ private fun DrawScope.drawRipple(m: Meter, t: Float) {
     }
 }
 
+
+// ---------------- レトロLR センター（中央から左右へ、横幅いっぱい） ----------------
+
+/** 左右の音量を -30dB〜0dB の範囲に広げて、針の振れ（バーの動き）を大きくする */
+private fun wideLevel(v: Float): Float {
+    if (v <= 0.001f) return 0f
+    val db = v * 42f - 42f
+    return ((db + 30f) / 30f).coerceIn(0f, 1f)
+}
+
+private fun DrawScope.drawRetroLRCenter(m: Meter) {
+    drawRect(Color(0xFF0D0F0D))
+    val segs = 26
+    val cx = size.width / 2
+    val gap = 5f
+    val margin = 6f
+    val half = cx - gap - margin
+    val segW = half / segs
+    val rowH = size.height * 0.56f
+    val top = size.height * 0.08f
+    for (c in 0..1) {
+        val lit = (wideLevel(m.lr[c]) * segs).toInt()
+        val pk = (wideLevel(m.lrPeak[c]) * segs).toInt().coerceAtMost(segs - 1)
+        for (s in 0 until segs) {
+            // 約4割から黄色、最後の4つが赤
+            val color = when {
+                s >= segs - 4 -> LedRed
+                s >= segs * 4 / 10 -> LedYellow
+                else -> LedGreen
+            }
+            val w = segW * 0.74f
+            val x = if (c == 0) cx - gap - segW * (s + 1) + segW * 0.13f else cx + gap + segW * s + segW * 0.13f
+            val on = s < lit || (s == pk && m.lrPeak[c] > 0.03f)
+            if (on) {
+                drawRect(color.copy(alpha = 0.25f), Offset(x - 2f, top - 2f), Size(w + 4f, rowH + 4f))
+                drawRect(color, Offset(x, top), Size(w, rowH))
+            } else {
+                drawRect(color.copy(alpha = 0.08f), Offset(x, top), Size(w, rowH))
+            }
+        }
+    }
+    drawLine(Color(0xFF2E3A2E), Offset(cx, top - 4f), Offset(cx, top + rowH + 4f), strokeWidth = 2f)
+    val marks = listOf(-30, -20, -10, -6, -3, 0)
+    val y = top + rowH + size.height * 0.27f
+    for (db in marks) {
+        val f = (db + 30f) / 30f
+        val text = if (db == 0) "0" else db.toString()
+        val dx = half * f
+        if (db != -30) {
+            label(text, cx - gap - dx + segW * 0.6f, y, Color(0xFF7A8A7A), size.height * 0.13f, bold = false)
+            label(text, cx + gap + dx - segW * 0.6f, y, Color(0xFF7A8A7A), size.height * 0.13f, bold = false)
+        }
+    }
+}
+
+// ---------------- 音の立ち上がりで波紋を作る（共通） ----------------
+
+private fun spawnOnsets(m: Meter, onHit: (group: Int, strength: Float) -> Unit) {
+    val groups = m.bands(m.level, 8)
+    for (g in 0 until 8) {
+        m.cool[g] -= m.dt
+        val rise = groups[g] - m.prevGroup[g]
+        if (rise > 0.07f && groups[g] > 0.25f && m.cool[g] <= 0f && m.drops.size + m.ripples.size < 70) {
+            m.cool[g] = 0.2f + m.rnd.nextFloat() * 0.2f
+            onHit(g, groups[g])
+        }
+        m.prevGroup[g] += (groups[g] - m.prevGroup[g]) * min(1f, m.dt * 8f)
+    }
+}
+
+// ---------------- カラー波紋（真上から見た水面） ----------------
+
+private fun DrawScope.drawRippleTop(m: Meter, t: Float) {
+    drawRect(Brush.radialGradient(listOf(Color(0xFF0A1420), Color(0xFF03060A)), center = center, radius = size.width * 0.7f))
+    val baseHue = (t * 12f) % 360f // 全体の色が時間とともに移り変わる
+    spawnOnsets(m) { g, strength ->
+        val x = size.width * ((g + m.rnd.nextFloat()) / 8f)
+        val y = size.height * (0.1f + m.rnd.nextFloat() * 0.8f)
+        val hue = (baseHue + g * 40f + m.rnd.nextFloat() * 30f) % 360f
+        m.ripples += Meter.Ripple(x, y, size.height * (0.45f + 0.9f * strength), 2.0f + strength * 1.5f, hue)
+    }
+    m.idle -= m.dt
+    if (m.idle <= 0f) {
+        m.idle = 0.9f + m.rnd.nextFloat() * 2f
+        m.ripples += Meter.Ripple(
+            size.width * m.rnd.nextFloat(), size.height * m.rnd.nextFloat(),
+            size.height * 0.5f, 2.2f, (baseHue + m.rnd.nextFloat() * 360f) % 360f,
+        )
+    }
+    val it = m.ripples.iterator()
+    while (it.hasNext()) {
+        val r = it.next()
+        r.age += m.dt
+        val life = r.age / r.life
+        if (life >= 1f) {
+            it.remove()
+            continue
+        }
+        val fade = (1f - life) * (1f - life)
+        // 輪が広がるにつれて色相も少しずつずれる
+        for (k in 0 until 4) {
+            val lag = life - k * 0.09f
+            if (lag <= 0f) continue
+            val rad = r.maxR * (1f - (1f - lag) * (1f - lag))
+            val c = Color.hsv((r.hue + k * 18f + lag * 60f) % 360f, 0.7f, 1f)
+            drawCircle(c.copy(alpha = fade * 0.18f), rad, Offset(r.x, r.y), style = Stroke(width = 9f))
+            drawCircle(c.copy(alpha = fade * (0.85f - k * 0.18f)), rad, Offset(r.x, r.y), style = Stroke(width = 2.2f - k * 0.35f))
+        }
+        if (r.age < 0.3f) {
+            val a = 1f - r.age / 0.3f
+            val c = Color.hsv(r.hue, 0.4f, 1f)
+            drawCircle(
+                Brush.radialGradient(listOf(c.copy(alpha = 0.8f * a), Color.Transparent), center = Offset(r.x, r.y), radius = 30f),
+                30f, Offset(r.x, r.y),
+            )
+        }
+    }
+}
+
 // ---------------- アナログVU（琥珀色の針メーター） ----------------
 
 private const val VU_MIN = -20f
@@ -806,89 +830,100 @@ private fun DrawScope.drawVu(m: Meter) {
         m.needleVel[c] += acc * m.dt
         m.needle[c] = (m.needle[c] + m.needleVel[c] * m.dt).coerceIn(-0.02f, 1.04f)
     }
-    val gap = size.width * 0.03f
-    val meterW = (size.width - gap * 3) / 2
+    val gap = size.width * 0.025f
+    val areaW = (size.width - gap * 3) / 2
+    val areaH = size.height - 8f
+    // 文字盤の縦横比を固定（横:縦 = 1.9:1）して、表示欄の形に関係なく崩れないようにする
+    val faceH = min(areaH, areaW / 1.9f)
+    val faceW = faceH * 1.9f
     for (c in 0..1) {
-        val left = gap + c * (meterW + gap)
-        drawVuMeter(left, 6f, meterW, size.height - 12f, m.needle[c], if (c == 0) "L" else "R")
+        val ax = gap + c * (areaW + gap)
+        val x = ax + (areaW - faceW) / 2
+        val y = (size.height - faceH) / 2
+        drawVuMeter(x, y, faceW, faceH, m.needle[c], if (c == 0) "L" else "R")
     }
 }
 
 private fun DrawScope.drawVuMeter(x: Float, y: Float, w: Float, h: Float, pos: Float, ch: String) {
-    // 黒い枠
-    drawRoundRect(Color(0xFF0A0908), Offset(x, y), Size(w, h), androidx.compose.ui.geometry.CornerRadius(10f, 10f))
-    val inset = h * 0.07f
+    drawRoundRect(Color(0xFF0A0908), Offset(x, y), Size(w, h), androidx.compose.ui.geometry.CornerRadius(h * 0.05f, h * 0.05f))
+    val inset = h * 0.06f
     val fx = x + inset
     val fy = y + inset
     val fw = w - inset * 2
     val fh = h - inset * 2
-    // 琥珀色のバックライト
-    drawRect(
-        Brush.radialGradient(
-            listOf(Color(0xFFF2B060), Color(0xFFD98A3A), Color(0xFF8A4A1C)),
-            center = Offset(fx + fw / 2, fy + fh * 0.75f),
-            radius = max(fw, fh) * 0.75f,
-        ),
-        Offset(fx, fy), Size(fw, fh),
-    )
-    val ink = Color(0xFF2A1608)
-    val cx = fx + fw / 2
-    val pivotY = fy + fh * 1.25f
-    val radius = min(fh * 1.0f, fw * 0.62f)
-    val sweep = 0.85f // ラジアン（左右それぞれ）
-    fun pointAt(p: Float, r: Float): Offset {
-        val a = -sweep + p * sweep * 2
-        return Offset(cx + sin(a) * r, pivotY - cos(a) * r)
-    }
-    // 目盛りの弧（0VU以上は赤）
-    val steps = 40
-    val zero = vuPos(0f)
-    for (i in 0 until steps) {
-        val p1 = i / steps.toFloat()
-        val p2 = (i + 1) / steps.toFloat()
-        val red = p1 >= zero
-        drawLine(
-            if (red) Color(0xFFC0281A) else ink,
-            pointAt(p1, radius), pointAt(p2, radius),
-            strokeWidth = if (red) 5f else 2f,
+    // 以下は文字盤の高さ fh を 1 とした寸法で配置する
+    fun px(v: Float) = v * fh
+    clipRect(fx, fy, fx + fw, fy + fh) {
+        drawRect(
+            Brush.radialGradient(
+                listOf(Color(0xFFF4BC6E), Color(0xFFDC8E3E), Color(0xFF8E4C1C)),
+                center = Offset(fx + fw / 2, fy + fh * 0.8f),
+                radius = fw * 0.65f,
+            ),
+            Offset(fx, fy), Size(fw, fh),
+        )
+        val ink = Color(0xFF2A1608)
+        val red = Color(0xFFB8221A)
+        val cx = fx + fw / 2
+        val pivotY = fy + px(1.32f)
+        val radius = px(1.04f)
+        val sweep = 0.8f
+        fun pointAt(p: Float, r: Float): Offset {
+            val a = -sweep + p * sweep * 2
+            return Offset(cx + sin(a) * r, pivotY - cos(a) * r)
+        }
+        // 目盛りの弧（0VU以上は赤く太く）
+        val zero = vuPos(0f)
+        val steps = 48
+        for (i in 0 until steps) {
+            val p1 = i / steps.toFloat()
+            val p2 = (i + 1) / steps.toFloat()
+            val isRed = p1 >= zero - 0.001f
+            drawLine(if (isRed) red else ink, pointAt(p1, radius), pointAt(p2, radius), strokeWidth = if (isRed) px(0.035f) else px(0.012f))
+        }
+        val marks = listOf(-20f, -10f, -7f, -5f, -3f, -2f, -1f, 0f, 1f, 2f, 3f)
+        val labelled = setOf(-20f, -10f, -7f, -5f, -3f, 0f, 3f)
+        for (v in marks) {
+            val p = vuPos(v)
+            val col = if (v > 0f) red else ink
+            val long = v in labelled
+            drawLine(col, pointAt(p, radius), pointAt(p, radius + px(if (long) 0.09f else 0.05f)), strokeWidth = px(0.012f))
+            if (long) {
+                val pt = pointAt(p, radius + px(0.17f))
+                val text = when {
+                    v > 0f -> "+${v.toInt()}"
+                    v == 0f -> "0"
+                    else -> "${-v.toInt()}"
+                }
+                label(text, pt.x, pt.y + px(0.04f), col, px(0.11f), bold = false)
+            }
+        }
+        // − と ＋ の記号、VU、チャンネル
+        val minus = pointAt(0f, radius + px(0.17f))
+        label("−", minus.x - px(0.12f), minus.y + px(0.04f), ink, px(0.11f))
+        label("VU", cx, fy + px(0.62f), ink, px(0.16f))
+        label(ch, fx + px(0.16f), fy + px(0.9f), ink.copy(alpha = 0.85f), px(0.12f))
+        // ピークランプ（右下）
+        val lampOn = pos > vuPos(1f)
+        val lamp = Offset(fx + fw - px(0.16f), fy + px(0.86f))
+        if (lampOn) drawCircle(Brush.radialGradient(listOf(Color(0x99FF3020), Color.Transparent), center = lamp, radius = px(0.14f)), px(0.14f), lamp)
+        drawCircle(if (lampOn) Color(0xFFFF3020) else Color(0xFF5A1A10), px(0.04f), lamp)
+        // 針（影と本体）
+        val tip = pointAt(pos.coerceIn(-0.02f, 1.04f), radius + px(0.07f))
+        val baseY = fy + fh
+        val k = (pivotY - baseY) / (pivotY - tip.y)
+        val base = Offset(cx + (tip.x - cx) * k, baseY)
+        drawLine(Color(0x55000000), base + Offset(px(0.02f), px(0.015f)), tip + Offset(px(0.02f), px(0.015f)), strokeWidth = px(0.016f), cap = StrokeCap.Round)
+        drawLine(Color(0xFF140A04), base, tip, strokeWidth = px(0.013f), cap = StrokeCap.Round)
+        // 下の支点カバー
+        drawRect(Color(0xFF1A120C), Offset(fx, fy + px(0.93f)), Size(fw, px(0.07f)))
+        // ガラスの映り込み
+        drawRect(
+            Brush.linearGradient(
+                listOf(Color.White.copy(alpha = 0.12f), Color.Transparent, Color.Transparent),
+                start = Offset(fx, fy), end = Offset(fx + fw, fy + fh),
+            ),
+            Offset(fx, fy), Size(fw, fh),
         )
     }
-    // 目盛りと数字
-    val marks = listOf(-20f, -10f, -7f, -5f, -3f, -2f, -1f, 0f, 1f, 2f, 3f)
-    val labelled = setOf(-20f, -10f, -7f, -5f, -3f, 0f, 3f)
-    for (v in marks) {
-        val p = vuPos(v)
-        val col = if (v > 0f) Color(0xFFC0281A) else ink
-        drawLine(col, pointAt(p, radius), pointAt(p, radius * 1.07f), strokeWidth = 2f)
-        if (v in labelled) {
-            val pt = pointAt(p, radius * 1.17f)
-            val text = if (v > 0f) "+${v.toInt()}" else v.toInt().toString()
-            label(text, pt.x, pt.y + fh * 0.04f, col, fh * 0.11f, bold = false)
-        }
-    }
-    // 中央の表示
-    label("VU", cx, fy + fh * 0.66f, ink, fh * 0.16f)
-    label(ch, fx + fw * 0.1f, fy + fh * 0.9f, ink.copy(alpha = 0.8f), fh * 0.12f)
-    // ピークランプ
-    val lampOn = pos > vuPos(1f)
-    val lamp = Offset(fx + fw * 0.9f, fy + fh * 0.84f)
-    drawCircle(if (lampOn) Color(0xFFFF3020) else Color(0xFF5A1A10), fh * 0.045f, lamp)
-    if (lampOn) drawCircle(Brush.radialGradient(listOf(Color(0x99FF3020), Color.Transparent), center = lamp, radius = fh * 0.14f), fh * 0.14f, lamp)
-    // 針（影と本体）。下の支点は文字盤の外にある
-    val tip = pointAt(pos.coerceIn(-0.02f, 1.04f), radius * 1.08f)
-    val baseY = fy + fh
-    val t = (pivotY - baseY) / (pivotY - tip.y)
-    val base = Offset(cx + (tip.x - cx) * t, baseY)
-    drawLine(Color(0x55000000), base + Offset(3f, 2f), tip + Offset(3f, 2f), strokeWidth = 2.6f, cap = StrokeCap.Round)
-    drawLine(Color(0xFF140A04), base, tip, strokeWidth = 2.2f, cap = StrokeCap.Round)
-    // 支点カバー
-    drawRect(Color(0xFF1A120C), Offset(fx, fy + fh * 0.93f), Size(fw, fh * 0.07f))
-    // ガラスの映り込み
-    drawRect(
-        Brush.linearGradient(
-            listOf(Color.White.copy(alpha = 0.12f), Color.Transparent, Color.Transparent),
-            start = Offset(fx, fy), end = Offset(fx + fw, fy + fh),
-        ),
-        Offset(fx, fy), Size(fw, fh),
-    )
 }

@@ -268,42 +268,48 @@ fun AlbumTile(album: Album, subtitle: String, onClick: () -> Unit) {
     }
 }
 
-/** CarPlayと同じ「あ・Z」ジャンプ：押すと文字の一覧を出し、選んだ文字の位置へ移動 */
+/**
+ * CarPlayと同じ「あ・Z」ジャンプ。あ〜わ行とA〜Zを常に同じ並びで表示し、
+ * 押した文字（その文字のアーティストが無ければ次の文字）の位置へ移動する。
+ */
 @Composable
-fun JumpGrid(letters: List<String>, onSelect: (String) -> Unit, onClose: () -> Unit) {
+fun JumpGrid(letters: List<String>, present: Set<String>, onSelect: (String) -> Unit, onClose: () -> Unit) {
     val cols = 7
-    val rows = letters.chunked(cols)
+    val cells: List<String?> = letters + listOf(null) // 最後の空きマスの右下に「完了」
+    val rows = cells.chunked(cols)
     Column(
-        Modifier.fillMaxSize().background(Pal.Bg).padding(horizontal = 24.dp, vertical = 16.dp)
+        Modifier.fillMaxSize().background(Pal.Bg).padding(horizontal = 28.dp, vertical = 12.dp)
             .pointerInput(Unit) { detectTapGestures { } },
     ) {
-        Column(Modifier.weight(1f).fillMaxWidth()) {
-            rows.forEach { row ->
-                Row(Modifier.weight(1f).fillMaxWidth()) {
-                    row.forEach { letter ->
-                        Box(
-                            Modifier.weight(1f).fillMaxHeight().padding(4.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Pal.Surface)
-                                .clickable { onSelect(letter) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(letter, color = Pal.Text, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
+        rows.forEachIndexed { ri, row ->
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+                for (ci in 0 until cols) {
+                    val letter = row.getOrNull(ci)
+                    val isLast = ri == rows.lastIndex && ci == cols - 1
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .clip(RoundedCornerShape(10.dp))
+                            .then(
+                                when {
+                                    letter != null -> Modifier.clickable { onSelect(letter) }
+                                    isLast -> Modifier.clickable(onClick = onClose)
+                                    else -> Modifier
+                                }
+                            )
+                            .padding(start = 12.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (letter != null) {
+                            Text(
+                                letter,
+                                color = if (letter in present) Pal.Text else Pal.Sub.copy(alpha = 0.5f),
+                                fontSize = 26.sp,
+                            )
+                        } else if (isLast) {
+                            Text("完了", color = Pal.Accent, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
-                    repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
-            }
-            // 行数が少ない時にマスが縦に伸びすぎないように
-            repeat((5 - rows.size).coerceAtLeast(0)) { Spacer(Modifier.weight(1f)) }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Box(
-                Modifier.height(56.dp).clip(RoundedCornerShape(12.dp)).background(Pal.Surface2)
-                    .clickable(onClick = onClose).padding(horizontal = 32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("完了", color = Pal.Accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -388,11 +394,19 @@ fun <T> IndexedList(
         }
         if (showJump) {
             BackHandler { showJump = false }
+            // あ〜わ・A〜Zは常に表示。「漢」「#」は該当があるときだけ
+            val letters = SortKey.GROUPS.filter { (it != "漢" && it != "#") || groups.containsKey(it) }
             JumpGrid(
-                letters = groups.keys.toList(),
+                letters = letters,
+                present = groups.keys,
                 onSelect = { g ->
                     showJump = false
-                    scope.launch { state.scrollToItem((groups[g] ?: 0) + 1) }
+                    // その文字が無ければ、次にある文字へ（無ければ最後の文字へ）
+                    val order = SortKey.GROUPS
+                    val target = order.drop(order.indexOf(g)).firstOrNull { groups.containsKey(it) }
+                        ?: groups.keys.lastOrNull()
+                    val index = target?.let { groups[it] } ?: 0
+                    scope.launch { state.scrollToItem(index + 1) }
                 },
                 onClose = { showJump = false },
             )

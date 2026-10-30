@@ -47,13 +47,14 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     OFF("off", "オフ", "表示しません"),
     BLOCKS("blocks", "カラーブロック", "虹色のブロックが跳ね、床に映り込みます"),
     RETRO("retro", "レトロLED", "昔のLEDグラフィックイコライザー風"),
-    RETRO_LR("retro_lr", "レトロLR", "左右チャンネルのLEDメーターが横に振れます"),
+    RETRO_LR("retro_lr", "レトロLR", "左右チャンネルのLEDメーターが上下2段で横に振れます"),
+    RETRO_LR_CENTER("retro_lr_center", "レトロLR センター", "中央から左（L）と右（R）へLEDが伸びます"),
     WAVE("wave", "レインボーウェーブ", "音の波が奥から手前へ流れる立体スペクトラム"),
     CIRCLE("circle", "サークル", "円形に広がるスペクトラムと波形"),
     RIBBON("ribbon", "ライトリボン", "光の帯がうねり、粒子がきらめきます"),
     WARP("warp", "ワープ", "光の筋が中心から飛び出す、ワープ空間"),
     LIGHTS("lights", "イルミネーション", "色が流れる電球が音に合わせて点灯します"),
-    AMBIENT("ambient", "間接照明", "落ち着いた光がゆっくり呼吸するように変化します"),
+    RIPPLE("ripple", "波紋", "しずくが落ちて波紋が広がり、重なって消えていきます"),
     FLICKER("flicker", "ゆらぐ電灯", "古い電球がチラついたり、消えかけたりします"),
     ;
 
@@ -147,6 +148,15 @@ private class Meter {
     class Streak(var angle: Float, var z: Float, var len: Float, var hue: Float)
     val streaks = ArrayList<Streak>()
 
+    class Ripple(val x: Float, val y: Float, val maxR: Float, val life: Float, val hue: Float, var age: Float = 0f)
+    val ripples = ArrayList<Ripple>()
+
+    class Drop(val x: Float, val y: Float, val size: Float, val hue: Float, var t: Float = 0f)
+    val drops = ArrayList<Drop>()
+    val prevGroup = FloatArray(8)
+    val cool = FloatArray(8)
+    var idle = 0f
+
     class Lamp(var bright: Float = 1f, var target: Float = 1f, var state: Int = 0, var timer: Float = 0f, var chatter: Float = 0f)
     val lamps = ArrayList<Lamp>()
 }
@@ -199,12 +209,13 @@ fun Visualizer(
                 VisStyle.BLOCKS -> drawBlocks(meter)
                 VisStyle.RETRO -> drawRetro(meter)
                 VisStyle.RETRO_LR -> drawRetroLR(meter)
+                VisStyle.RETRO_LR_CENTER -> drawRetroLRCenter(meter)
+                VisStyle.RIPPLE -> drawRipple(meter, t)
                 VisStyle.WAVE -> drawWave(meter)
                 VisStyle.CIRCLE -> drawCircleVis(meter, t)
                 VisStyle.RIBBON -> drawRibbon(meter, t)
                 VisStyle.WARP -> drawWarp(meter, t)
                 VisStyle.LIGHTS -> drawLights(meter, t)
-                VisStyle.AMBIENT -> drawAmbient(meter, t)
                 VisStyle.FLICKER -> drawFlicker(meter, t)
                 VisStyle.OFF -> Unit
             }
@@ -559,45 +570,6 @@ private fun DrawScope.drawLights(m: Meter, t: Float) {
     }
 }
 
-// ---------------- 間接照明（落ち着いた光） ----------------
-
-private fun DrawScope.drawAmbient(m: Meter, t: Float) {
-    drawRect(Color(0xFF0B0806))
-    val e = (m.slowEnergy * 1.6f).coerceIn(0f, 1f)
-    val warmShift = 0.5f + 0.5f * sin(t * 0.03f) // 数分かけて色味がゆっくり変わる
-    val warm = lerp(Color(0xFFFFB25A), Color(0xFFFF8A6A), warmShift)
-    val cool = lerp(Color(0xFF7B5CFF), Color(0xFFB0507F), 1f - warmShift)
-    // 上の縁から壁を照らすコーブ照明
-    drawRect(
-        Brush.verticalGradient(
-            0f to warm.copy(alpha = 0.35f + 0.35f * e),
-            0.45f to warm.copy(alpha = 0.08f + 0.1f * e),
-            1f to Color.Transparent,
-        )
-    )
-    // 柔らかい光だまり
-    val spots = listOf(
-        Triple(0.2f + 0.04f * sin(t * 0.07f), warm, 0.9f),
-        Triple(0.55f + 0.05f * sin(t * 0.05f + 2f), cool, 0.7f),
-        Triple(0.85f + 0.04f * sin(t * 0.06f + 4f), warm, 0.8f),
-    )
-    for ((fx, c, w) in spots) {
-        val breath = 0.55f + 0.45f * sin(t * 0.4f + fx * 5f)
-        val rad = size.height * (1.1f + 0.4f * e) * w
-        val center = Offset(size.width * fx, size.height * 0.75f)
-        drawCircle(
-            Brush.radialGradient(listOf(c.copy(alpha = (0.18f + 0.35f * e) * (0.7f + 0.3f * breath)), Color.Transparent), center = center, radius = rad),
-            rad,
-            center,
-        )
-    }
-    // 床面の反射ライン
-    drawRect(
-        Brush.horizontalGradient(listOf(Color.Transparent, warm.copy(alpha = 0.25f + 0.25f * e), Color.Transparent)),
-        Offset(0f, size.height - 3f), Size(size.width, 3f),
-    )
-}
-
 // ---------------- ゆらぐ電灯（チラつき・消えかけ） ----------------
 
 private fun DrawScope.drawFlicker(m: Meter, t: Float) {
@@ -667,5 +639,140 @@ private fun DrawScope.drawFlicker(m: Meter, t: Float) {
             Offset(cx - size.width / count * 0.5f, size.height * 0.85f),
             Size(size.width / count, size.height * 0.2f),
         )
+    }
+}
+
+// ---------------- レトロLR センター（中央から左右へ） ----------------
+
+private fun DrawScope.drawRetroLRCenter(m: Meter) {
+    drawRect(Color(0xFF0D0F0D))
+    val segs = 22
+    val cx = size.width / 2
+    val gap = 6f
+    val labelW = size.height * 0.32f
+    val half = cx - gap - labelW
+    val segW = half / segs
+    val rowH = size.height * 0.46f
+    val top = size.height * 0.1f
+    label("L", labelW / 2, top + rowH * 0.8f, LedGreen.copy(alpha = 0.9f), rowH * 0.85f)
+    label("R", size.width - labelW / 2, top + rowH * 0.8f, LedGreen.copy(alpha = 0.9f), rowH * 0.85f)
+    for (c in 0..1) {
+        val lit = (m.lr[c] * segs).toInt()
+        val pk = (m.lrPeak[c] * segs).toInt().coerceAtMost(segs - 1)
+        for (s in 0 until segs) {
+            val color = when {
+                s >= segs - 3 -> LedRed
+                s >= segs - 7 -> LedYellow
+                else -> LedGreen
+            }
+            val w = segW * 0.74f
+            // L は中央から左へ、R は中央から右へ
+            val x = if (c == 0) cx - gap - segW * (s + 1) + segW * 0.13f else cx + gap + segW * s + segW * 0.13f
+            val on = s < lit || (s == pk && m.lrPeak[c] > 0.03f)
+            if (on) {
+                drawRect(color.copy(alpha = 0.25f), Offset(x - 2f, top - 2f), Size(w + 4f, rowH + 4f))
+                drawRect(color, Offset(x, top), Size(w, rowH))
+            } else {
+                drawRect(color.copy(alpha = 0.08f), Offset(x, top), Size(w, rowH))
+            }
+        }
+    }
+    drawLine(Color(0xFF2E3A2E), Offset(cx, top - 4f), Offset(cx, top + rowH + 4f), strokeWidth = 2f)
+    // 目盛り
+    val marks = listOf(-40 to 0f, -20 to 0.5238f, -10 to 0.7619f, -3 to 0.9286f, 0 to 1f)
+    val y = top + rowH + size.height * 0.28f
+    for ((db, f) in marks) {
+        val text = if (db == 0) "0" else db.toString()
+        val dx = half * f
+        label(text, cx - gap - dx, y, Color(0xFF7A8A7A), size.height * 0.13f, bold = false)
+        label(text, cx + gap + dx, y, Color(0xFF7A8A7A), size.height * 0.13f, bold = false)
+    }
+}
+
+// ---------------- 波紋（しずくが落ちて広がる） ----------------
+
+private fun DrawScope.drawRipple(m: Meter, t: Float) {
+    drawRect(Brush.verticalGradient(listOf(Color(0xFF02060C), Color(0xFF06182A), Color(0xFF0A2238))))
+    val dt = m.dt
+    val surfaceTop = size.height * 0.22f
+
+    // 音の立ち上がり（アタック）でしずくを落とす。低音は左、高音は右
+    val groups = m.bands(m.level, 8)
+    for (g in 0 until 8) {
+        m.cool[g] -= dt
+        val rise = groups[g] - m.prevGroup[g]
+        if (rise > 0.07f && groups[g] > 0.25f && m.cool[g] <= 0f && m.drops.size + m.ripples.size < 60) {
+            m.cool[g] = 0.22f + m.rnd.nextFloat() * 0.2f
+            val x = size.width * ((g + m.rnd.nextFloat()) / 8f)
+            val y = surfaceTop + (size.height - surfaceTop) * (0.15f + m.rnd.nextFloat() * 0.8f)
+            m.drops += Meter.Drop(x, y, 0.5f + groups[g], 190f + g * 8f)
+        }
+        m.prevGroup[g] += (groups[g] - m.prevGroup[g]) * min(1f, dt * 8f)
+    }
+    // 静かな時もときどき雫が落ちる
+    m.idle -= dt
+    if (m.idle <= 0f) {
+        m.idle = 1.2f + m.rnd.nextFloat() * 2.5f
+        val y = surfaceTop + (size.height - surfaceTop) * (0.15f + m.rnd.nextFloat() * 0.8f)
+        m.drops += Meter.Drop(size.width * m.rnd.nextFloat(), y, 0.45f, 200f)
+    }
+
+    // 落ちていくしずく
+    val fall = 0.28f
+    val itD = m.drops.iterator()
+    while (itD.hasNext()) {
+        val d = itD.next()
+        d.t += dt
+        val p = (d.t / fall).coerceAtMost(1f)
+        val y = d.y - (1f - p) * (d.y + 10f) * 0.6f
+        drawLine(
+            Color.White.copy(alpha = 0.15f + 0.5f * p),
+            Offset(d.x, y - 14f * d.size), Offset(d.x, y),
+            strokeWidth = 2f, cap = StrokeCap.Round,
+        )
+        if (p >= 1f) {
+            val depth = (d.y - surfaceTop) / (size.height - surfaceTop) // 手前ほど大きく
+            m.ripples += Meter.Ripple(d.x, d.y, size.height * (0.35f + 0.7f * depth) * d.size, 2.2f + d.size, d.hue)
+            itD.remove()
+        }
+    }
+
+    // 広がる波紋（手前ほど大きい楕円にして水面らしく）
+    val itR = m.ripples.iterator()
+    while (itR.hasNext()) {
+        val r = itR.next()
+        r.age += dt
+        val life = r.age / r.life
+        if (life >= 1f) {
+            itR.remove()
+            continue
+        }
+        val fade = (1f - life) * (1f - life)
+        for (k in 0 until 3) {
+            val lag = life - k * 0.12f
+            if (lag <= 0f) continue
+            val rx = r.maxR * (1f - (1f - lag) * (1f - lag))
+            val ry = rx * 0.32f
+            val c = Color.hsv(r.hue, 0.45f, 1f)
+            drawOval(
+                c.copy(alpha = fade * (0.75f - k * 0.2f)),
+                Offset(r.x - rx, r.y - ry),
+                Size(rx * 2, ry * 2),
+                style = Stroke(width = (2.4f - k * 0.6f) * (1f - lag * 0.5f)),
+            )
+        }
+        // 落ちた瞬間のきらめき
+        if (r.age < 0.25f) {
+            val a = 1f - r.age / 0.25f
+            drawCircle(
+                Brush.radialGradient(listOf(Color.White.copy(alpha = 0.6f * a), Color.Transparent), center = Offset(r.x, r.y), radius = 22f),
+                22f, Offset(r.x, r.y),
+            )
+        }
+    }
+    // 水面の反射のゆらぎ
+    for (i in 0 until 6) {
+        val y = surfaceTop + (size.height - surfaceTop) * (i + 0.5f) / 6f + 3f * sin(t * 0.8f + i)
+        drawLine(Color(0x0FFFFFFF), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
     }
 }

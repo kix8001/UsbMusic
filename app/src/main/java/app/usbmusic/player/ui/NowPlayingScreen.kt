@@ -59,13 +59,13 @@ fun NowPlayingScreen(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val narrow = maxWidth < 600.dp || maxHeight > maxWidth
+        val art = min(maxWidth - 40.dp, maxHeight * 0.5f)
         if (narrow) {
             // 縦長（分割表示）：アートを横幅いっぱいに、その下に情報と操作
             Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
                 if (showQueue) {
                     QueuePanel(conn, lib) { showQueue = false }
                 } else {
-                    val art = min(maxWidth - 40.dp, maxHeight * 0.5f)
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         AlbumArt(track, art, corner = 12.dp)
                     }

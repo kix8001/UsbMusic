@@ -94,12 +94,19 @@ fun LibraryEmpty(vm: MainViewModel, onOpenSettings: () -> Unit) {
 // ---------------- アーティスト ----------------
 
 @Composable
-fun ArtistsScreen(lib: Library, onArtist: (String) -> Unit) {
+fun ArtistsScreen(
+    lib: Library,
+    jumpRequested: Boolean = false,
+    onJumpHandled: () -> Unit = {},
+    onArtist: (String) -> Unit,
+) {
     val state = rememberLazyListState()
     IndexedList(
         list = lib.artists,
         name = { it.sortName },
         state = state,
+        jumpRequested = jumpRequested,
+        onJumpHandled = onJumpHandled,
         header = { ScreenTitle("アーティスト") },
     ) { _, artist ->
         ListRow(

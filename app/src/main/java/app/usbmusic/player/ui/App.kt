@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +55,7 @@ enum class NavTab(val label: String, val icon: ImageVector, val root: Screen) {
     NOW("再生中", Icons.Filled.GraphicEq, Screen.NowPlaying),
     ARTISTS("アーティスト", Icons.Filled.Person, Screen.Artists),
     ALBUMS("アルバム", Icons.Filled.Album, Screen.Albums),
+    A2Z("A2Z", Icons.Filled.SortByAlpha, Screen.Artists), // アーティストの頭文字一覧をすぐ開く
     SONGS("曲", Icons.Filled.MusicNote, Screen.Songs),
     SEARCH("検索", Icons.Filled.Search, Screen.Search),
     SETTINGS("設定", Icons.Filled.Settings, Screen.Settings),
@@ -113,7 +115,11 @@ private fun MainLayout(vm: MainViewModel, conn: PlayerConnection, onPickFolder: 
     BackHandler(enabled = stack.size > 1) { pop() }
 
     val selectTab: (NavTab) -> Unit = { t ->
-        if (t == tab) stacks[t] = listOf(t.root) else tab = t
+        if (t == NavTab.A2Z) {
+            tab = NavTab.ARTISTS
+            stacks[NavTab.ARTISTS] = listOf(NavTab.ARTISTS.root)
+            vm.requestJump()
+        } else if (t == tab) stacks[t] = listOf(t.root) else tab = t
     }
     val content: @Composable ColumnScope.() -> Unit = {
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -195,7 +201,11 @@ private fun ScreenContent(
             onArtist = { open(NavTab.ARTISTS, Screen.ArtistDetail(it)) },
             onAlbum = { open(NavTab.ALBUMS, Screen.AlbumDetail(it)) },
         )
-        Screen.Artists -> ArtistsScreen(lib) { push(Screen.ArtistDetail(it)) }
+        Screen.Artists -> ArtistsScreen(
+            lib = lib,
+            jumpRequested = vm.jumpRequested,
+            onJumpHandled = { vm.jumpHandled() },
+        ) { push(Screen.ArtistDetail(it)) }
         Screen.Albums -> AlbumsScreen(lib) { push(Screen.AlbumDetail(it)) }
         Screen.Songs -> SongsScreen(lib, conn)
         Screen.Search -> SearchScreen(

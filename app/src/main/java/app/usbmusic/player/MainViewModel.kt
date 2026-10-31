@@ -61,6 +61,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         setVisualizerStyle(list[(list.indexOf(visualizer) + 1) % list.size])
     }
 
+    /** 左メニューの「A2Z」から頭文字一覧を開く要求 */
+    var jumpRequested by mutableStateOf(false)
+        private set
+
+    fun requestJump() {
+        jumpRequested = true
+    }
+
+    fun jumpHandled() {
+        jumpRequested = false
+    }
+
     var mediaScanRunning by mutableStateOf(false)
         private set
     private var mediaScanRequested = false

@@ -356,6 +356,8 @@ fun <T> IndexedList(
     list: List<T>,
     name: (T) -> String,
     state: LazyListState,
+    jumpRequested: Boolean = false,
+    onJumpHandled: () -> Unit = {},
     header: @Composable () -> Unit,
     row: @Composable (Int, T) -> Unit,
 ) {
@@ -369,6 +371,12 @@ fun <T> IndexedList(
     }
     val scope = rememberCoroutineScope()
     var showJump by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(jumpRequested) {
+        if (jumpRequested) {
+            showJump = true
+            onJumpHandled()
+        }
+    }
 
     fun page(dir: Int) {
         scope.launch {

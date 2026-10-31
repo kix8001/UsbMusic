@@ -49,8 +49,8 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     OFF("off", "オフ", "表示しません"),
     BLOCKS("blocks", "カラーブロック", "虹色のブロックが跳ね、床に映り込みます"),
     RETRO("retro", "レトロLED", "昔のLEDグラフィックイコライザー風"),
-    RETRO_LR("retro_lr", "レトロLR", "左右チャンネルのLEDメーターが上下2段で横に振れます"),
     VU("vu", "アナログVU", "琥珀色に光るアナログ針メーター（L・R）"),
+    VFD("vfd", "VFDスペクトラム", "昔のカーコンポの蛍光表示管風、奥行きのある立体イコライザー"),
     RETRO_LR_CENTER("retro_lr_center", "レトロLR センター", "中央から左（L）と右（R）へLEDが伸びます"),
     WAVE("wave", "レインボーウェーブ", "音の波が奥から手前へ流れる立体スペクトラム"),
     CIRCLE("circle", "サークル", "円形に広がるスペクトラムと波形"),
@@ -158,6 +158,15 @@ private class Meter {
     val cool = FloatArray(8)
     var idle = 0f
 
+    // ワープ
+    var warpSpeed = 1f
+    var warpSpin = 0f
+    val rings = ArrayList<Float>()
+
+    // VFDスペクトラムの残像
+    val vfdHistory = ArrayDeque<FloatArray>()
+    var vfdTimer = 0f
+
     // アナログVUの針（ばねのように動く）
     val needle = FloatArray(2)
     val needleVel = FloatArray(2)
@@ -213,9 +222,9 @@ fun Visualizer(
             when (style) {
                 VisStyle.BLOCKS -> drawBlocks(meter)
                 VisStyle.RETRO -> drawRetro(meter)
-                VisStyle.RETRO_LR -> drawRetroLR(meter)
                 VisStyle.RETRO_LR_CENTER -> drawRetroLRCenter(meter)
                 VisStyle.VU -> drawVu(meter)
+                VisStyle.VFD -> drawVfd(meter)
                 VisStyle.RIPPLE -> drawRipple(meter, t)
                 VisStyle.RIPPLE_TOP -> drawRippleTop(meter, t)
                 VisStyle.WAVE -> drawWave(meter)
@@ -248,6 +257,13 @@ fun Visualizer(
 private val LedGreen = Color(0xFF33FF66)
 private val LedYellow = Color(0xFFFFD233)
 private val LedRed = Color(0xFFFF3B30)
+
+private val measurePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE }
+
+private fun measure(text: String, sizePx: Float): Float {
+    measurePaint.textSize = sizePx
+    return measurePaint.measureText(text)
+}
 
 private fun DrawScope.label(text: String, x: Float, y: Float, color: Color, sizePx: Float, bold: Boolean = true) {
     drawIntoCanvas {
@@ -328,48 +344,6 @@ private fun DrawScope.drawRetro(m: Meter) {
                 drawRect(color.copy(alpha = 0.08f), Offset(x, y), Size(bw, bh))
             }
         }
-    }
-}
-
-// ---------------- レトロLR（左右チャンネルの横型LEDメーター） ----------------
-
-private fun DrawScope.drawRetroLR(m: Meter) {
-    drawRect(Color(0xFF0D0F0D))
-    val segs = 36
-    val labelW = size.height * 0.28f
-    val left = labelW + 6f
-    val right = size.width - 12f
-    val segW = (right - left) / segs
-    val rowH = size.height * 0.3f
-    val rows = listOf(size.height * 0.08f, size.height * 0.62f)
-    val names = listOf("L", "R")
-    for (c in 0..1) {
-        val top = rows[c]
-        label(names[c], labelW / 2 + 4f, top + rowH * 0.78f, LedGreen.copy(alpha = 0.9f), rowH * 0.9f)
-        val lit = (m.lr[c] * segs).toInt()
-        val pk = (m.lrPeak[c] * segs).toInt().coerceAtMost(segs - 1)
-        for (s in 0 until segs) {
-            val color = when {
-                s >= segs - 5 -> LedRed
-                s >= segs - 11 -> LedYellow
-                else -> LedGreen
-            }
-            val x = left + segW * s + segW * 0.12f
-            val w = segW * 0.76f
-            val on = s < lit || (s == pk && m.lrPeak[c] > 0.03f)
-            if (on) {
-                drawRect(color.copy(alpha = 0.25f), Offset(x - 2f, top - 2f), Size(w + 4f, rowH + 4f))
-                drawRect(color, Offset(x, top), Size(w, rowH))
-            } else {
-                drawRect(color.copy(alpha = 0.08f), Offset(x, top), Size(w, rowH))
-            }
-        }
-    }
-    // 目盛り（dB）
-    val marks = listOf(-40 to 0f, -20 to 0.5238f, -10 to 0.7619f, -6 to 0.857f, -3 to 0.9286f, 0 to 1f)
-    val midY = size.height * 0.5f + size.height * 0.05f
-    for ((db, f) in marks) {
-        label(if (db == 0) "0" else db.toString(), left + (right - left) * f, midY, Color(0xFF7A8A7A), size.height * 0.11f, bold = false)
     }
 }
 
@@ -454,42 +428,70 @@ private fun DrawScope.drawCircleVis(m: Meter, t: Float) {
     drawPath(path, Color.White.copy(alpha = 0.9f), style = Stroke(width = 2f))
 }
 
-// ---------------- ワープ（中心から飛び出す光の筋） ----------------
+// ---------------- ワープ（光の筋とトンネルが迫ってくる） ----------------
 
 private fun DrawScope.drawWarp(m: Meter, t: Float) {
     drawRect(Color.Black)
-    val cx = size.width / 2
-    val cy = size.height / 2
-    val sx = size.width / size.height
-    if (m.streaks.isEmpty()) repeat(110) {
-        m.streaks += Meter.Streak(m.rnd.nextFloat() * 6.283f, 0.1f + m.rnd.nextFloat() * 2.9f, 0.1f + m.rnd.nextFloat() * 0.5f, m.rnd.nextFloat())
+    // 速度：音が大きいほど・低音が鳴るほど加速。ビートでぐっと伸びる
+    val target = 0.6f + m.energy * 7f + m.bass * 6f
+    m.warpSpeed += (target - m.warpSpeed) * min(1f, m.dt * (if (target > m.warpSpeed) 8f else 1.5f))
+    m.warpSpin += m.dt * (0.15f + m.energy * 0.6f)
+    val speed = m.warpSpeed
+    // 中心がゆっくり漂い、進行方向が揺れる感じ
+    val cx = size.width / 2 + size.width * 0.08f * sin(t * 0.37f)
+    val cy = size.height / 2 + size.height * 0.12f * sin(t * 0.53f + 1f)
+    val sx = size.width / size.height * 0.6f
+
+    // トンネルの枠（四角い輪が手前に迫ってくる）
+    if (m.rings.isEmpty()) repeat(9) { m.rings += 0.4f + it * 0.35f }
+    for (i in m.rings.indices) {
+        m.rings[i] -= m.dt * speed * 0.35f
+        if (m.rings[i] <= 0.12f) m.rings[i] += 9 * 0.35f
+        val z = m.rings[i]
+        val half = size.height * 0.16f / z
+        val a = ((1f - z / 3.3f).coerceIn(0f, 1f) * 0.55f)
+        val rot = m.warpSpin * 0.5f + z * 0.15f
+        val corners = listOf(-1f to -1f, 1f to -1f, 1f to 1f, -1f to 1f).map { (u, v) ->
+            val x = u * half * sx
+            val y = v * half
+            Offset(cx + x * cos(rot) - y * sin(rot), cy + x * sin(rot) + y * cos(rot))
+        }
+        for (k in 0..3) drawLine(Color(0xFF2AF5B0).copy(alpha = a), corners[k], corners[(k + 1) % 4], strokeWidth = 1.5f + (1f - z / 3.3f).coerceAtLeast(0f) * 2f)
     }
-    val speed = 0.4f + m.energy * 5f + m.bass * 3f
+
+    // 光の筋：速いほど長く尾を引く
+    if (m.streaks.isEmpty()) repeat(140) {
+        m.streaks += Meter.Streak(m.rnd.nextFloat() * 6.283f, 0.1f + m.rnd.nextFloat() * 2.9f, 0.05f + m.rnd.nextFloat() * 0.2f, m.rnd.nextFloat())
+    }
     for (s in m.streaks) {
         s.z -= m.dt * speed
-        if (s.z <= 0.08f) {
+        if (s.z <= 0.06f) {
             s.z = 3f
             s.angle = m.rnd.nextFloat() * 6.283f
-            s.len = 0.1f + m.rnd.nextFloat() * 0.5f
+            s.hue = m.rnd.nextFloat()
         }
-        val k = size.height * 0.12f
+        val trail = s.len * (0.4f + speed * 0.35f)
+        val k = size.height * 0.1f
         val r1 = k / s.z
-        val r2 = k / (s.z + s.len)
-        if (r1 > size.width) continue
-        val ca = cos(s.angle) * sx * 0.5f
-        val sa = sin(s.angle)
+        val r2 = k / (s.z + trail)
+        if (r1 > size.width * 1.5f) continue
+        val ang = s.angle + m.warpSpin
+        val ca = cos(ang) * sx
+        val sa = sin(ang)
         val near = (1f - s.z / 3f).coerceIn(0f, 1f)
-        val color = lerp(Color(0xFF2AF5B0), Color(0xFF9CFFE8), s.hue)
+        val color = lerp(Color(0xFF2AF5B0), if (s.hue > 0.85f) Color.White else Color(0xFF7CFFE0), s.hue)
         drawLine(
-            color.copy(alpha = near * 0.9f),
+            color.copy(alpha = near),
             Offset(cx + ca * r2, cy + sa * r2),
             Offset(cx + ca * r1, cy + sa * r1),
-            strokeWidth = 1f + near * 3.5f,
+            strokeWidth = 0.8f + near * 4f,
             cap = StrokeCap.Round,
         )
     }
-    val glow = size.height * (0.25f + 0.4f * m.energy)
-    drawCircle(Brush.radialGradient(listOf(Color(0x8835FFC0), Color.Transparent), center = Offset(cx, cy), radius = glow), glow, Offset(cx, cy))
+    // 中心の光と、ビートの瞬間のフラッシュ
+    val glow = size.height * (0.2f + 0.5f * m.energy)
+    drawCircle(Brush.radialGradient(listOf(Color(0xAA9CFFE8), Color(0x332AF5B0), Color.Transparent), center = Offset(cx, cy), radius = glow), glow, Offset(cx, cy))
+    if (m.bass > 0.55f) drawRect(Color(0xFF2AF5B0).copy(alpha = ((m.bass - 0.55f) * 0.35f).coerceAtMost(0.15f)))
 }
 
 // ---------------- イルミネーション ----------------
@@ -731,28 +733,38 @@ private fun DrawScope.drawRetroLRCenter(m: Meter) {
         }
     }
     drawLine(Color(0xFF2E3A2E), Offset(cx, top - 4f), Offset(cx, top + rowH + 4f), strokeWidth = 2f)
-    val marks = listOf(-30, -20, -10, -6, -3, 0)
-    val y = top + rowH + size.height * 0.27f
-    for (db in marks) {
-        val f = (db + 30f) / 30f
-        val text = if (db == 0) "0" else db.toString()
-        val dx = half * f
-        if (db != -30) {
-            label(text, cx - gap - dx + segW * 0.6f, y, Color(0xFF7A8A7A), size.height * 0.13f, bold = false)
-            label(text, cx + gap + dx - segW * 0.6f, y, Color(0xFF7A8A7A), size.height * 0.13f, bold = false)
-        }
+    // 目盛り：重ならない分だけ表示（狭い画面では自動で間引く）
+    val textSize = min(size.height * 0.13f, half * 0.12f)
+    val y = top + rowH + (size.height - top - rowH) * 0.5f + textSize * 0.35f
+    val placed = ArrayList<Pair<Float, Float>>() // 右半分での (左端, 右端)
+    for (db in listOf(0, -10, -20, -3, -6)) {
+        val text = db.toString()
+        val tw = measure(text, textSize) + textSize * 0.5f
+        val dx = (half * (db + 30f) / 30f - segW * 0.5f).coerceAtMost(half - tw / 2)
+        val l = dx - tw / 2
+        val r = dx + tw / 2
+        if (l < textSize || placed.any { r > it.first && l < it.second }) continue
+        placed += l to r
+        label(text, cx + gap + dx, y, Color(0xFF7A8A7A), textSize, bold = false)
+        label(text, cx - gap - dx, y, Color(0xFF7A8A7A), textSize, bold = false)
     }
 }
 
 // ---------------- 音の立ち上がりで波紋を作る（共通） ----------------
 
-private fun spawnOnsets(m: Meter, onHit: (group: Int, strength: Float) -> Unit) {
+private fun spawnOnsets(
+    m: Meter,
+    maxCount: Int = 70,
+    minRise: Float = 0.07f,
+    cooldown: Float = 0.2f,
+    onHit: (group: Int, strength: Float) -> Unit,
+) {
     val groups = m.bands(m.level, 8)
     for (g in 0 until 8) {
         m.cool[g] -= m.dt
         val rise = groups[g] - m.prevGroup[g]
-        if (rise > 0.07f && groups[g] > 0.25f && m.cool[g] <= 0f && m.drops.size + m.ripples.size < 70) {
-            m.cool[g] = 0.2f + m.rnd.nextFloat() * 0.2f
+        if (rise > minRise && groups[g] > 0.3f && m.cool[g] <= 0f && m.drops.size + m.ripples.size < maxCount) {
+            m.cool[g] = cooldown + m.rnd.nextFloat() * cooldown
             onHit(g, groups[g])
         }
         m.prevGroup[g] += (groups[g] - m.prevGroup[g]) * min(1f, m.dt * 8f)
@@ -764,7 +776,8 @@ private fun spawnOnsets(m: Meter, onHit: (group: Int, strength: Float) -> Unit) 
 private fun DrawScope.drawRippleTop(m: Meter, t: Float) {
     drawRect(Brush.radialGradient(listOf(Color(0xFF0A1420), Color(0xFF03060A)), center = center, radius = size.width * 0.7f))
     val baseHue = (t * 12f) % 360f // 全体の色が時間とともに移り変わる
-    spawnOnsets(m) { g, strength ->
+    // 波紋は少なめに：同時に最大10個、音域ごとに約1秒あける
+    spawnOnsets(m, maxCount = 10, minRise = 0.12f, cooldown = 0.9f) { g, strength ->
         val x = size.width * ((g + m.rnd.nextFloat()) / 8f)
         val y = size.height * (0.1f + m.rnd.nextFloat() * 0.8f)
         val hue = (baseHue + g * 40f + m.rnd.nextFloat() * 30f) % 360f
@@ -772,8 +785,8 @@ private fun DrawScope.drawRippleTop(m: Meter, t: Float) {
     }
     m.idle -= m.dt
     if (m.idle <= 0f) {
-        m.idle = 0.9f + m.rnd.nextFloat() * 2f
-        m.ripples += Meter.Ripple(
+        m.idle = 2.5f + m.rnd.nextFloat() * 3f
+        if (m.ripples.size < 4) m.ripples += Meter.Ripple(
             size.width * m.rnd.nextFloat(), size.height * m.rnd.nextFloat(),
             size.height * 0.5f, 2.2f, (baseHue + m.rnd.nextFloat() * 360f) % 360f,
         )
@@ -925,5 +938,68 @@ private fun DrawScope.drawVuMeter(x: Float, y: Float, w: Float, h: Float, pos: F
             ),
             Offset(fx, fy), Size(fw, fh),
         )
+    }
+}
+
+// ---------------- VFDスペクトラム（昔のカーコンポの蛍光表示管、奥行きあり） ----------------
+
+private val VfdRows = listOf(
+    Color(0xFF3B6BFF), Color(0xFF3B8BFF), Color(0xFF4FB3FF), Color(0xFF7FE0FF), Color(0xFFBDF4FF),
+    Color(0xFF6CFF7A), Color(0xFFB5FF4A), Color(0xFFFFD84A), Color(0xFFFF8A3A), Color(0xFFFF3B30), Color(0xFFFF3B30),
+)
+
+private fun DrawScope.drawVfd(m: Meter) {
+    drawRect(Color(0xFF050608))
+    val n = 10
+    val segs = VfdRows.size
+    val labels = listOf("63", "125", "250", "500", "1k", "2k", "3.5k", "6k", "10k", "16k")
+    // 残像（奥行き）用に少し前の値を記録
+    m.vfdTimer += m.dt
+    if (m.vfdTimer > 0.06f) {
+        m.vfdTimer = 0f
+        m.vfdHistory.addFirst(m.bands(m.level, n))
+        while (m.vfdHistory.size > 4) m.vfdHistory.removeLast()
+    }
+    val labelH = size.height * 0.14f
+    val floorY = size.height - labelH - 4f
+    val topY = size.height * 0.06f
+    val h = floorY - topY
+    val cx = size.width / 2
+    val baseW = size.width * 0.8f
+    // 遠近：上にいくほど幅が狭くなる台形。奥の層は右上へずらす
+    fun colX(i: Int, rowFrac: Float, depth: Int): Float {
+        val shrink = 1f - 0.22f * rowFrac
+        val x = cx - baseW / 2 + baseW * (i + 0.5f) / n
+        return cx + (x - cx) * shrink + depth * size.width * 0.012f
+    }
+    val segH = h / segs
+    val colW = baseW / n * 0.72f
+    val layers = listOf(m.bands(m.level, n)) + m.vfdHistory.toList().take(3)
+    for (depth in layers.indices.reversed()) {
+        val lv = layers[depth]
+        val dim = if (depth == 0) 1f else 0.28f / depth
+        for (i in 0 until n) {
+            val lit = (lv[i] * segs + 0.5f).toInt().coerceIn(if (depth == 0) 1 else 0, segs)
+            for (s in 0 until segs) {
+                val rowFrac = s / (segs - 1f)
+                val shrink = 1f - 0.22f * rowFrac
+                val w = colW * shrink
+                val x = colX(i, rowFrac, depth) - w / 2
+                val y = floorY - segH * (s + 1) + segH * 0.18f - depth * size.height * 0.02f
+                val c = VfdRows[s]
+                if (s < lit) {
+                    if (depth == 0) drawRect(c.copy(alpha = 0.22f), Offset(x - 3f, y - 3f), Size(w + 6f, segH * 0.64f + 6f))
+                    drawRect(c.copy(alpha = dim), Offset(x, y), Size(w, segH * 0.64f))
+                } else if (depth == 0) {
+                    drawRect(c.copy(alpha = 0.06f), Offset(x, y), Size(w, segH * 0.64f))
+                }
+            }
+        }
+    }
+    // 床の線と周波数表示
+    drawLine(Color(0xFF4FB3FF).copy(alpha = 0.5f), Offset(cx - baseW / 2, floorY + 2f), Offset(cx + baseW / 2, floorY + 2f), strokeWidth = 1.5f)
+    val ts = min(labelH * 0.75f, baseW / n * 0.32f)
+    for (i in 0 until n) {
+        label(labels[i], colX(i, 0f, 0), floorY + 4f + ts, Color(0xFF7FE0FF).copy(alpha = 0.85f), ts, bold = false)
     }
 }

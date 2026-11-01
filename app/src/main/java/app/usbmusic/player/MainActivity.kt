@@ -1,7 +1,9 @@
 package app.usbmusic.player
 
 import android.Manifest
+import android.app.SearchManager
 import android.content.Intent
+import android.provider.MediaStore
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity() {
         conn = PlayerConnection(applicationContext)
         refreshPermission()
         if (!permitted || !videoGranted()) askPermissions()
+        handleVoiceIntent(intent)
         setContent {
             App(
                 vm = vm,
@@ -56,6 +59,19 @@ class MainActivity : ComponentActivity() {
                 onRequestPermission = { askPermissions() },
                 onPickFolder = { folderLauncher.launch(null) },
             )
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleVoiceIntent(intent)
+    }
+
+    /** Googleアシスタントからの「○○を再生」 */
+    private fun handleVoiceIntent(intent: Intent?) {
+        if (intent?.action == MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) {
+            vm.pendingVoice = intent.getStringExtra(SearchManager.QUERY).orEmpty()
+            intent.action = null
         }
     }
 

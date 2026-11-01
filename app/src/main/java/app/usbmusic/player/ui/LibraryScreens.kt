@@ -330,6 +330,7 @@ fun SongsScreen(lib: Library, conn: PlayerConnection) {
 fun SearchScreen(
     lib: Library,
     conn: PlayerConnection,
+    voice: @Composable () -> Unit = {},
     onArtist: (String) -> Unit,
     onAlbum: (String) -> Unit,
 ) {
@@ -344,7 +345,7 @@ fun SearchScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenTitle("検索")
+        ScreenTitle("検索") { voice() }
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },

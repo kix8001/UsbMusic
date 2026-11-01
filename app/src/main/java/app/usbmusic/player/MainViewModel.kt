@@ -21,6 +21,8 @@ import app.usbmusic.player.data.Prefs
 import app.usbmusic.player.data.SortKey
 import app.usbmusic.player.data.Video
 import app.usbmusic.player.data.VideoPositions
+import app.usbmusic.player.playback.PlaybackOptions
+import app.usbmusic.player.playback.VolumeLeveler
 import app.usbmusic.player.ui.VisStyle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +60,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 動画のフル画面表示 */
     var fullscreen by mutableStateOf(false)
+
+    // ---------- 動画・音量の設定 ----------
+    var videoFade by mutableStateOf(prefs.videoFade)
+        private set
+    var videoTitles by mutableStateOf(prefs.videoTitles)
+        private set
+    var leveler by mutableStateOf(prefs.leveler)
+        private set
+
+    init {
+        VolumeLeveler.enabled = prefs.leveler
+        PlaybackOptions.videoFade = prefs.videoFade
+    }
+
+    fun setVideoFade(on: Boolean) {
+        videoFade = on
+        prefs.videoFade = on
+        PlaybackOptions.videoFade = on
+    }
+
+    fun setVideoTitles(on: Boolean) {
+        videoTitles = on
+        prefs.videoTitles = on
+    }
+
+    fun setLeveler(on: Boolean) {
+        leveler = on
+        prefs.leveler = on
+        VolumeLeveler.enabled = on
+    }
+
+    // ---------- 音声操作 ----------
+    /** 「OK Google、mTunesで○○を再生」などで届いた言葉（画面側で実行する） */
+    var pendingVoice by mutableStateOf<String?>(null)
+
+    /** 音声操作の結果を画面上部に少し表示する */
+    var voiceMessage by mutableStateOf<String?>(null)
+        private set
+    private var voiceJob: Job? = null
+
+    fun showVoiceMessage(text: String) {
+        voiceMessage = text
+        voiceJob?.cancel()
+        voiceJob = viewModelScope.launch {
+            delay(3500)
+            voiceMessage = null
+        }
+    }
 
     fun refreshVideoPositions() {
         videoPositions = VideoPositions.all(getApplication())

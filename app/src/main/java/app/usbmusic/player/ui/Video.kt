@@ -4,6 +4,12 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import app.usbmusic.player.playback.fadeLevel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -36,6 +42,7 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Subtitles
@@ -105,6 +112,76 @@ fun VideoSurface(conn: PlayerConnection, modifier: Modifier = Modifier, large: B
         onRelease = { it.player = null },
         modifier = modifier.background(Color.Black),
     )
+}
+
+/**
+ * 動画の表示面に、切り替え時のフェードと、最初の10秒間のタイトル・アーティスト表示を重ねたもの
+ */
+@Composable
+fun VideoLayer(
+    conn: PlayerConnection,
+    fade: Boolean,
+    titles: Boolean,
+    modifier: Modifier = Modifier,
+    large: Boolean = false,
+) {
+    Box(modifier) {
+        VideoSurface(conn, Modifier.fillMaxSize(), large)
+        val id = conn.current?.mediaId
+        val changedAt = conn.itemChangedAt
+        if (fade) {
+            var alpha by remember { mutableFloatStateOf(0f) }
+            LaunchedEffect(id, changedAt) {
+                while (true) {
+                    val level = if (conn.isPlaying) {
+                        fadeLevel(SystemClock.elapsedRealtime() - changedAt, conn.position, conn.duration)
+                    } else 1f
+                    alpha = 1f - level
+                    delay(33)
+                }
+            }
+            if (alpha > 0.01f) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = alpha)))
+        }
+        if (titles && id != null) {
+            var show by remember { mutableStateOf(false) }
+            LaunchedEffect(id, changedAt) {
+                val left = 10_000L - (SystemClock.elapsedRealtime() - changedAt)
+                if (left > 0) {
+                    delay(600) // フェードインの後に出す
+                    show = true
+                    delay((left - 600).coerceAtLeast(0))
+                }
+                show = false
+            }
+            val meta = conn.current?.mediaMetadata
+            AnimatedVisibility(
+                visible = show,
+                enter = fadeIn(tween(900)),
+                exit = fadeOut(tween(1400)),
+                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color(0xB3000000))))
+                        .padding(horizontal = if (large) 48.dp else 16.dp, vertical = if (large) 40.dp else 12.dp)
+                ) {
+                    Text(
+                        meta?.title?.toString().orEmpty(),
+                        color = Color.White, fontSize = if (large) 36.sp else 20.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                    val artist = meta?.artist?.toString().orEmpty()
+                    if (artist.isNotBlank()) {
+                        Text(artist, color = Color(0xFFFF8FA0), fontSize = if (large) 24.sp else 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    val album = meta?.albumTitle?.toString().orEmpty()
+                    if (album.isNotBlank()) {
+                        Text(album, color = Color(0xCCFFFFFF), fontSize = if (large) 18.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ---------------- サムネイル ----------------
@@ -295,6 +372,13 @@ fun VideosScreen(vm: MainViewModel, conn: PlayerConnection, onArtist: (String) -
     val currentId = conn.current?.mediaId
     val header: @Composable () -> Unit = {
         ScreenTitle("動画") {
+            IconButton(onClick = {
+                conn.playVideos(context, videos, 0, shuffled = true)
+                onPlayed()
+            }, modifier = Modifier.size(52.dp)) {
+                Icon(Icons.Filled.Shuffle, contentDescription = "シャッフル", tint = Pal.Accent, modifier = Modifier.size(30.dp))
+            }
+            Spacer(Modifier.width(8.dp))
             Row(Modifier.clip(RoundedCornerShape(12.dp)).background(Pal.Surface2)) {
                 listOf(false to "タイトル", true to "アーティスト").forEach { (mode, label) ->
                     Box(
@@ -367,9 +451,15 @@ fun VideoArtistScreen(vm: MainViewModel, conn: PlayerConnection, name: String, o
                     Text(artist.name, color = Pal.Text, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text("${artist.videos.size}本", color = Pal.Sub, fontSize = 17.sp)
                     Spacer(Modifier.height(12.dp))
-                    PillButton(Icons.Filled.PlayArrow, "最初から順に再生") {
-                        conn.playVideos(context, artist.videos, 0)
-                        onPlayed()
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        PillButton(Icons.Filled.PlayArrow, "最初から順に再生") {
+                            conn.playVideos(context, artist.videos, 0)
+                            onPlayed()
+                        }
+                        PillButton(Icons.Filled.Shuffle, "シャッフル") {
+                            conn.playVideos(context, artist.videos, 0, shuffled = true)
+                            onPlayed()
+                        }
                     }
                 }
             }
@@ -468,7 +558,7 @@ private fun Context.findActivity(): Activity? {
 }
 
 @Composable
-fun FullscreenVideo(conn: PlayerConnection, onExit: () -> Unit) {
+fun FullscreenVideo(conn: PlayerConnection, fade: Boolean = true, titles: Boolean = true, onExit: () -> Unit) {
     val view = LocalView.current
     // ステータスバー等を隠して、画面全体で再生
     DisposableEffect(Unit) {
@@ -499,7 +589,7 @@ fun FullscreenVideo(conn: PlayerConnection, onExit: () -> Unit) {
             lastTouch = System.currentTimeMillis()
         }
     ) {
-        VideoSurface(conn, Modifier.fillMaxSize(), large = true)
+        VideoLayer(conn, fade, titles, Modifier.fillMaxSize(), large = true)
         if (controlsVisible) {
             var position by remember { mutableLongStateOf(conn.position) }
             var dragging by remember { mutableStateOf<Float?>(null) }
@@ -547,6 +637,7 @@ fun FullscreenVideo(conn: PlayerConnection, onExit: () -> Unit) {
                     )
                     Text(fmtTime(duration), color = Color.White, fontSize = 15.sp)
                 }
+                VolumeSlider(Modifier.fillMaxWidth(0.6f).align(Alignment.CenterHorizontally), light = true)
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,

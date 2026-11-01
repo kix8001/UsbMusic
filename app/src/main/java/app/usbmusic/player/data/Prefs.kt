@@ -22,6 +22,21 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("autoResume", true)
         set(v) = sp.edit().putBoolean("autoResume", v).apply()
 
+    /** 動画の切り替え時にフェードする */
+    var videoFade: Boolean
+        get() = sp.getBoolean("videoFade", true)
+        set(v) = sp.edit().putBoolean("videoFade", v).apply()
+
+    /** 動画の最初にタイトルとアーティストを表示する */
+    var videoTitles: Boolean
+        get() = sp.getBoolean("videoTitles", true)
+        set(v) = sp.edit().putBoolean("videoTitles", v).apply()
+
+    /** 音量を一定にする */
+    var leveler: Boolean
+        get() = sp.getBoolean("leveler", true)
+        set(v) = sp.edit().putBoolean("leveler", v).apply()
+
     var visualizer: String
         get() = sp.getString("visualizer", "blocks") ?: "blocks"
         set(v) = sp.edit().putString("visualizer", v).apply()

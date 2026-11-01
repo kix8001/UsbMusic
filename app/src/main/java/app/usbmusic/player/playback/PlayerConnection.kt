@@ -2,6 +2,7 @@ package app.usbmusic.player.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -44,6 +45,10 @@ class PlayerConnection(private val context: Context) {
     var tracks by mutableStateOf(Tracks.EMPTY)
         private set
 
+    /** 今の曲・動画に切り替わった時刻（動画の冒頭タイトル表示・フェードに使う） */
+    var itemChangedAt by mutableLongStateOf(0L)
+        private set
+
     /** いま再生中なのが動画か */
     val isVideo: Boolean
         get() = MediaItems.isVideo(current) || tracks.containsType(C.TRACK_TYPE_VIDEO)
@@ -83,6 +88,7 @@ class PlayerConnection(private val context: Context) {
 
     private fun sync(p: Player) {
         isPlaying = p.isPlaying
+        if (p.currentMediaItem?.mediaId != current?.mediaId) itemChangedAt = SystemClock.elapsedRealtime()
         current = p.currentMediaItem
         shuffle = p.shuffleModeEnabled
         repeat = p.repeatMode
@@ -104,17 +110,17 @@ class PlayerConnection(private val context: Context) {
     }
 
     /** 動画を再生（前回の続きから）。リストの次の動画へも続けて進める */
-    fun playVideos(context: Context, videos: List<Video>, start: Int) {
+    fun playVideos(context: Context, videos: List<Video>, start: Int, shuffled: Boolean = false) {
         val c = controller ?: return
         if (videos.isEmpty()) return
-        val index = start.coerceIn(0, videos.size - 1)
+        val index = if (shuffled) Random.nextInt(videos.size) else start.coerceIn(0, videos.size - 1)
         val resume = VideoPositions.get(context, videos[index].key)?.first ?: 0L
         c.trackSelectionParameters = c.trackSelectionParameters.buildUpon()
             .clearOverrides()
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
             .build()
-        c.shuffleModeEnabled = false
-        c.setMediaItems(videos.map(MediaItems::from), index, resume)
+        c.shuffleModeEnabled = shuffled
+        c.setMediaItems(videos.map(MediaItems::from), index, if (shuffled) 0L else resume)
         c.prepare()
         c.play()
     }

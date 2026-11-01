@@ -141,16 +141,29 @@ private fun MainLayout(vm: MainViewModel, conn: PlayerConnection, onPickFolder: 
             }
         }
         if (conn.current != null && screen != Screen.NowPlaying) {
-            MiniPlayer(conn, lib) { open(NavTab.NOW, null) }
+            MiniPlayer(conn, lib, voice = { VoiceButton(vm, conn, 52.dp) }) { open(NavTab.NOW, null) }
         }
     }
 
     // 動画のフル画面は、動画以外になったら自動で閉じる
     LaunchedEffect(conn.isVideo) { if (!conn.isVideo) vm.fullscreen = false }
 
+    // 「OK Google、mTunesで○○を再生」などで届いた言葉を実行
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(vm.pendingVoice, conn.controller, vm.loaded) {
+        val q = vm.pendingVoice ?: return@LaunchedEffect
+        if (conn.controller == null || !vm.loaded) return@LaunchedEffect
+        vm.pendingVoice = null
+        vm.showVoiceMessage(
+            if (q.isBlank()) {
+                conn.controller?.play(); "再生します"
+            } else "🎤 「$q」\n" + VoiceCommands.run(q, vm, conn, context)
+        )
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (vm.fullscreen && conn.isVideo) {
-            FullscreenVideo(conn) { vm.fullscreen = false }
+            FullscreenVideo(conn, vm.videoFade, vm.videoTitles) { vm.fullscreen = false }
         } else if (maxWidth < 600.dp) {
             // 縦長（分割表示）：メニューを下に置き、画面の横幅をすべて使う
             Column(Modifier.fillMaxSize()) {
@@ -163,6 +176,7 @@ private fun MainLayout(vm: MainViewModel, conn: PlayerConnection, onPickFolder: 
                 Column(Modifier.weight(1f).fillMaxHeight()) { content() }
             }
         }
+        VoiceBanner(vm, Modifier.align(Alignment.TopCenter))
     }
 }
 
@@ -209,6 +223,9 @@ private fun ScreenContent(
             onVisTap = { vm.nextVisualizer() },
             fullscreen = vm.fullscreen,
             onFullscreen = { vm.fullscreen = true },
+            videoFade = vm.videoFade,
+            videoTitles = vm.videoTitles,
+            voice = { VoiceButton(vm, conn, 48.dp) },
             onArtist = { open(NavTab.ARTISTS, Screen.ArtistDetail(it)) },
             onAlbum = { open(NavTab.ALBUMS, Screen.AlbumDetail(it)) },
         )
@@ -225,6 +242,7 @@ private fun ScreenContent(
         Screen.Search -> SearchScreen(
             lib = lib,
             conn = conn,
+            voice = { VoiceButton(vm, conn, 56.dp) },
             onArtist = { push(Screen.ArtistDetail(it)) },
             onAlbum = { push(Screen.AlbumDetail(it)) },
         )
@@ -271,7 +289,7 @@ private fun Sidebar(current: NavTab, onSelect: (NavTab) -> Unit) {
 }
 
 @Composable
-private fun MiniPlayer(conn: PlayerConnection, lib: Library, onOpen: () -> Unit) {
+private fun MiniPlayer(conn: PlayerConnection, lib: Library, voice: @Composable () -> Unit = {}, onOpen: () -> Unit) {
     val item = conn.current ?: return
     val track = remember(item.mediaId, lib) { lib.byUri(item.mediaId) ?: Track.fromItem(item) }
     Row(
@@ -291,6 +309,8 @@ private fun MiniPlayer(conn: PlayerConnection, lib: Library, onOpen: () -> Unit)
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
+        voice()
+        Spacer(Modifier.width(8.dp))
         IconButton(onClick = { conn.toggle() }, modifier = Modifier.size(72.dp)) {
             Icon(
                 if (conn.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,

@@ -50,6 +50,9 @@ fun NowPlayingScreen(
     onAlbum: (String) -> Unit,
     fullscreen: Boolean = false,
     onFullscreen: () -> Unit = {},
+    videoFade: Boolean = true,
+    videoTitles: Boolean = true,
+    voice: @Composable () -> Unit = {},
 ) {
     val item = conn.current
     if (item == null) {
@@ -65,7 +68,7 @@ fun NowPlayingScreen(
             m.clip(RoundedCornerShape(12.dp)).background(Color.Black).clickable(onClick = onFullscreen),
             contentAlignment = Alignment.Center,
         ) {
-            if (!fullscreen) VideoSurface(conn, Modifier.fillMaxSize())
+            if (!fullscreen) VideoLayer(conn, videoFade, videoTitles, Modifier.fillMaxSize())
         }
     }
 
@@ -85,7 +88,7 @@ fun NowPlayingScreen(
                     Spacer(Modifier.height(16.dp))
                     PlayerPanel(
                         conn, track, lib, visStyle, onVisTap, onArtist, onAlbum,
-                        compact = true, video = video, onFullscreen = onFullscreen,
+                        compact = true, video = video, onFullscreen = onFullscreen, voice = voice,
                         modifier = Modifier.weight(1f),
                     ) { showQueue = true }
                 }
@@ -106,7 +109,7 @@ fun NowPlayingScreen(
                     } else {
                         PlayerPanel(
                             conn, track, lib, visStyle, onVisTap, onArtist, onAlbum,
-                            compact = false, video = video, onFullscreen = onFullscreen,
+                            compact = false, video = video, onFullscreen = onFullscreen, voice = voice,
                             modifier = Modifier.fillMaxSize(),
                         ) { showQueue = true }
                     }
@@ -129,6 +132,7 @@ private fun PlayerPanel(
     modifier: Modifier,
     video: Boolean = false,
     onFullscreen: () -> Unit = {},
+    voice: @Composable () -> Unit = {},
     onQueue: () -> Unit,
 ) {
     var position by remember { mutableLongStateOf(conn.position) }
@@ -209,8 +213,14 @@ private fun PlayerPanel(
             ToggleIcon(Icons.Filled.QueueMusic, false, tog) { onQueue() }
         }
 
+        // 音声操作のマイクと音量
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            voice()
+            Spacer(Modifier.width(8.dp))
+            VolumeSlider(Modifier.weight(1f))
+        }
         if (video) {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
             VideoButtons(conn, onFullscreen)
         }
         if (showVis) {

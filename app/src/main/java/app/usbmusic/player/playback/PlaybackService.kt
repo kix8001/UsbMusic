@@ -25,7 +25,10 @@ import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import app.usbmusic.player.data.VideoPositions
+import android.os.SystemClock
+import app.usbmusic.player.data.Prefs
 import org.json.JSONArray
+import kotlin.math.abs
 import org.json.JSONObject
 
 /**
@@ -50,6 +53,10 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        Prefs(this).let {
+            VolumeLeveler.enabled = it.leveler
+            PlaybackOptions.videoFade = it.videoFade
+        }
         // 音のデータをビジュアライザー用に分岐させる
         val renderers = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
@@ -57,7 +64,7 @@ class PlaybackService : MediaSessionService() {
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
             ): AudioSink = DefaultAudioSink.Builder(context)
-                .setAudioProcessors(arrayOf<AudioProcessor>(TeeAudioProcessor(Spectrum)))
+                .setAudioProcessors(arrayOf<AudioProcessor>(VolumeLeveler, TeeAudioProcessor(Spectrum)))
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                 .build()
@@ -93,6 +100,7 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                itemStart = SystemClock.elapsedRealtime()
                 flushVideo()
                 trackVideo()
                 savePosition()
@@ -127,6 +135,7 @@ class PlaybackService : MediaSessionService() {
         restoreState()
         handler.postDelayed(periodicSave, 10_000)
         handler.postDelayed(videoTick, 1_000)
+        handler.post(fadeTick)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -142,6 +151,7 @@ class PlaybackService : MediaSessionService() {
         savePosition()
         handler.removeCallbacks(periodicSave)
         handler.removeCallbacks(videoTick)
+        handler.removeCallbacks(fadeTick)
         session?.run {
             player.release()
             release()
@@ -159,6 +169,20 @@ class PlaybackService : MediaSessionService() {
         ): ListenableFuture<MutableList<MediaItem>> {
             val resolved = mediaItems.map { MediaItems.withLocal(it) }
             return Futures.immediateFuture(resolved.toMutableList())
+        }
+    }
+
+    // ---------- 動画の切り替え時のフェード（音） ----------
+
+    private var itemStart = 0L
+
+    private val fadeTick = object : Runnable {
+        override fun run() {
+            val v = if (PlaybackOptions.videoFade && MediaItems.isVideo(player.currentMediaItem) && player.isPlaying) {
+                fadeLevel(SystemClock.elapsedRealtime() - itemStart, player.currentPosition, player.duration)
+            } else 1f
+            if (abs(player.volume - v) > 0.01f) player.volume = v
+            handler.postDelayed(this, 40)
         }
     }
 

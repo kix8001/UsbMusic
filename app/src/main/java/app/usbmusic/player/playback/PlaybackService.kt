@@ -179,7 +179,7 @@ class PlaybackService : MediaSessionService() {
     private fun trackVideo() {
         val item = player.currentMediaItem
         if (MediaItems.isVideo(item)) {
-            videoId = item!!.mediaId
+            videoId = MediaItems.videoKeyOf(item!!)
             videoPos = player.currentPosition
             videoDur = player.duration.takeIf { it > 0 } ?: 0L
         } else {
@@ -211,6 +211,7 @@ class PlaybackService : MediaSessionService() {
                     .put("aa", m.albumArtist?.toString() ?: "")
                     .put("v", MediaItems.isVideo(item))
                     .put("s", JSONArray(MediaItems.subtitlesOf(item)))
+                    .put("k", if (MediaItems.isVideo(item)) MediaItems.videoKeyOf(item) else "")
             )
         }
         store.edit().putString("queue", arr.toString()).apply()
@@ -237,6 +238,7 @@ class PlaybackService : MediaSessionService() {
                 MediaItems.build(
                     o.getString("id"), o.optString("t"), o.optString("a"), o.optString("al"), o.optString("aa"),
                     video = o.optBoolean("v", false), subs = subs,
+                    videoKey = o.optString("k").ifBlank { null },
                 )
             }
         }.getOrNull()

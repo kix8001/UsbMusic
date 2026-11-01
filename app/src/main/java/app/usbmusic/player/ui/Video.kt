@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -45,6 +46,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,6 +70,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import app.usbmusic.player.MainViewModel
+import app.usbmusic.player.data.SortKey
+import app.usbmusic.player.data.TagReader
 import app.usbmusic.player.data.Video
 import app.usbmusic.player.playback.PlayerConnection
 import kotlinx.coroutines.Dispatchers
@@ -111,25 +115,29 @@ private object VideoThumbs {
     }
     private val gate = Semaphore(2)
 
-    fun peek(uri: String): Bitmap? = memory.get(uri)
+    /** USBを挿し直しても同じになるキー（ファイルの場所＋更新日時） */
+    private fun keyOf(v: Video) = v.key + "@" + v.lastModified
 
-    suspend fun load(context: Context, uri: String): Bitmap? {
-        memory.get(uri)?.let { return it }
+    fun peek(v: Video): Bitmap? = memory.get(keyOf(v))
+
+    suspend fun load(context: Context, v: Video): Bitmap? {
+        val key = keyOf(v)
+        memory.get(key)?.let { return it }
         return withContext(Dispatchers.IO) {
             gate.withPermit {
-                memory.get(uri) ?: run {
-                    val file = File(context.cacheDir, "vthumb/${md5(uri)}.jpg")
+                memory.get(key) ?: run {
+                    val file = File(context.cacheDir, "vthumb/${md5(key)}.jpg")
                     val bmp = if (file.exists()) {
                         android.graphics.BitmapFactory.decodeFile(file.path)
                     } else {
-                        extract(context, uri)?.also { b ->
+                        extract(context, v.uri)?.also { b ->
                             runCatching {
                                 file.parentFile?.mkdirs()
                                 FileOutputStream(file).use { b.compress(Bitmap.CompressFormat.JPEG, 85, it) }
                             }
                         }
                     }
-                    bmp?.also { memory.put(uri, it) }
+                    bmp?.also { memory.put(key, it) }
                 }
             }
         }
@@ -137,6 +145,15 @@ private object VideoThumbs {
 
     private fun extract(context: Context, uri: String): Bitmap? {
         val u = Uri.parse(uri)
+        // MP4/M4V にカバー画像（ポスター）が埋め込まれていればそれを使う
+        TagReader.mp4Cover(context, u)?.let { bytes ->
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            var sample = 1
+            while (opts.outWidth / (sample * 2) >= 400 && opts.outHeight / (sample * 2) >= 400) sample *= 2
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                ?.let { return it }
+        }
         if (u.authority == "media") {
             runCatching { return context.contentResolver.loadThumbnail(u, Size(384, 216), null) }
         }
@@ -144,11 +161,10 @@ private object VideoThumbs {
         return try {
             r.setDataSource(context, u)
             val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            val frame = r.getScaledFrameAtTime(
+            r.getScaledFrameAtTime(
                 (dur * 1000 / 10).coerceAtLeast(1_000_000L),
                 MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 384, 216,
             )
-            frame
         } catch (e: Exception) {
             null
         } finally {
@@ -163,8 +179,8 @@ private object VideoThumbs {
 @Composable
 fun VideoThumb(video: Video, modifier: Modifier = Modifier, progress: Float? = null) {
     val context = LocalContext.current
-    val bmp by produceState<ImageBitmap?>(VideoThumbs.peek(video.uri)?.asImageBitmap(), video.uri) {
-        if (value == null) value = VideoThumbs.load(context, video.uri)?.asImageBitmap()
+    val bmp by produceState<ImageBitmap?>(VideoThumbs.peek(video)?.asImageBitmap(), video.key, video.lastModified) {
+        if (value == null) value = VideoThumbs.load(context, video)?.asImageBitmap()
     }
     Box(modifier.clip(RoundedCornerShape(8.dp)).background(Pal.Surface2), contentAlignment = Alignment.Center) {
         val b = bmp
@@ -183,8 +199,57 @@ fun VideoThumb(video: Video, modifier: Modifier = Modifier, progress: Float? = n
 
 // ---------------- 動画の一覧 ----------------
 
+private const val NO_ARTIST = "アーティスト未設定"
+
+/** 動画のアーティスト（タグが無いものは「アーティスト未設定」にまとめる） */
+class VideoArtist(val name: String, val sortName: String, val videos: List<Video>)
+
+fun videoArtists(videos: List<Video>): List<VideoArtist> {
+    val groups = videos.groupBy { it.artist.ifBlank { NO_ARTIST } }.map { (name, list) ->
+        VideoArtist(
+            name,
+            if (name == NO_ARTIST) "\uFFFF" else list.firstOrNull { it.artistSort.isNotBlank() }?.artistSort ?: name,
+            list.sortedWith(compareBy<Video>({ it.album }, { it.sortTitle })),
+        )
+    }
+    val tagged = SortKey.sorted(groups.filter { it.name != NO_ARTIST }) { it.sortName }
+    return tagged + groups.filter { it.name == NO_ARTIST }
+}
+
 @Composable
-fun VideosScreen(vm: MainViewModel, conn: PlayerConnection, onPlayed: () -> Unit) {
+private fun VideoRow(vm: MainViewModel, v: Video, currentId: String?, showArtist: Boolean, onClick: () -> Unit) {
+    val rec = vm.videoPositions[v.key]
+    val dur = v.durationMs.takeIf { it > 0 } ?: rec?.second ?: 0L
+    val progress = if (rec != null && dur > 0) rec.first.toFloat() / dur else null
+    val sub = buildList {
+        if (showArtist && v.artist.isNotBlank()) add(v.artist)
+        if (v.album.isNotBlank()) add(v.album)
+        if (dur > 0) add(fmtTime(dur))
+        if (rec != null) add("続きから ${fmtTime(rec.first)}")
+        if (v.subtitles.isNotEmpty()) add("字幕ファイルあり")
+        if (v.artist.isBlank() && v.album.isBlank() && v.folderName.isNotBlank()) add(v.folderName)
+    }.joinToString(" ・ ")
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            VideoThumb(v, Modifier.size(width = 128.dp, height = 72.dp), progress)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    v.title, color = if (currentId == v.uri) Pal.Accent else Pal.Text, fontSize = 19.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                if (sub.isNotBlank()) Text(sub, color = Pal.Sub, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        HorizontalDivider(Modifier.padding(start = 164.dp), thickness = 0.5.dp, color = Pal.Divider)
+    }
+}
+
+@Composable
+fun VideosScreen(vm: MainViewModel, conn: PlayerConnection, onArtist: (String) -> Unit, onPlayed: () -> Unit) {
     val context = LocalContext.current
     val videos = vm.videos
     LaunchedEffect(Unit) { vm.refreshVideoPositions() }
@@ -226,42 +291,100 @@ fun VideosScreen(vm: MainViewModel, conn: PlayerConnection, onPlayed: () -> Unit
         }
         return
     }
-    val state = rememberLazyListState()
+    var byArtist by rememberSaveable { mutableStateOf(false) }
     val currentId = conn.current?.mediaId
-    IndexedList(
-        list = videos,
-        name = { it.title },
-        state = state,
-        header = { ScreenTitle("動画") },
-    ) { i, v ->
-        val rec = vm.videoPositions[v.uri]
-        val dur = v.durationMs.takeIf { it > 0 } ?: rec?.second ?: 0L
-        val progress = if (rec != null && dur > 0) rec.first.toFloat() / dur else null
-        val sub = buildList {
-            if (dur > 0) add(fmtTime(dur))
-            if (rec != null) add("続きから ${fmtTime(rec.first)}")
-            if (v.subtitles.isNotEmpty()) add("字幕ファイルあり")
-            if (v.folderName.isNotBlank()) add(v.folderName)
-        }.joinToString(" ・ ")
-        Column(Modifier.fillMaxWidth().clickable {
-            conn.playVideos(context, videos, i)
-            onPlayed()
-        }) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                VideoThumb(v, Modifier.size(width = 128.dp, height = 72.dp), progress)
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        v.title, color = if (currentId == v.uri) Pal.Accent else Pal.Text, fontSize = 19.sp,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
-                    if (sub.isNotBlank()) Text(sub, color = Pal.Sub, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val header: @Composable () -> Unit = {
+        ScreenTitle("動画") {
+            Row(Modifier.clip(RoundedCornerShape(12.dp)).background(Pal.Surface2)) {
+                listOf(false to "タイトル", true to "アーティスト").forEach { (mode, label) ->
+                    Box(
+                        Modifier.clip(RoundedCornerShape(12.dp))
+                            .background(if (byArtist == mode) Pal.Accent else Color.Transparent)
+                            .clickable { byArtist = mode }
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
+                    ) {
+                        Text(label, color = if (byArtist == mode) Color.White else Pal.Sub, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
-            HorizontalDivider(Modifier.padding(start = 164.dp), thickness = 0.5.dp, color = Pal.Divider)
+        }
+    }
+    if (byArtist) {
+        val artists = remember(videos) { videoArtists(videos) }
+        IndexedList(
+            list = artists,
+            name = { it.sortName },
+            state = rememberLazyListState(),
+            header = header,
+        ) { _, a ->
+            Column(Modifier.fillMaxWidth().clickable { onArtist(a.name) }) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    VideoThumb(a.videos.first(), Modifier.size(width = 96.dp, height = 54.dp))
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(a.name, color = Pal.Text, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${a.videos.size}本", color = Pal.Sub, fontSize = 15.sp)
+                    }
+                    Icon(androidx.compose.material.icons.Icons.Filled.ChevronRight, contentDescription = null, tint = Pal.Sub, modifier = Modifier.size(28.dp))
+                }
+                HorizontalDivider(Modifier.padding(start = 132.dp), thickness = 0.5.dp, color = Pal.Divider)
+            }
+        }
+    } else {
+        IndexedList(
+            list = videos,
+            name = { it.sortTitle },
+            state = rememberLazyListState(),
+            header = header,
+        ) { i, v ->
+            VideoRow(vm, v, currentId, showArtist = true) {
+                conn.playVideos(context, videos, i)
+                onPlayed()
+            }
+        }
+    }
+}
+
+/** アーティストごとの動画一覧 */
+@Composable
+fun VideoArtistScreen(vm: MainViewModel, conn: PlayerConnection, name: String, onBack: () -> Unit, onPlayed: () -> Unit) {
+    val context = LocalContext.current
+    val artist = remember(vm.videos, name) { videoArtists(vm.videos).firstOrNull { it.name == name } }
+    LaunchedEffect(Unit) { vm.refreshVideoPositions() }
+    val currentId = conn.current?.mediaId
+    Column(Modifier.fillMaxSize()) {
+        BackBar("動画", onBack)
+        if (artist == null) {
+            CenterMessage("見つかりません")
+            return@Column
+        }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+            item {
+                Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
+                    Text(artist.name, color = Pal.Text, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("${artist.videos.size}本", color = Pal.Sub, fontSize = 17.sp)
+                    Spacer(Modifier.height(12.dp))
+                    PillButton(Icons.Filled.PlayArrow, "最初から順に再生") {
+                        conn.playVideos(context, artist.videos, 0)
+                        onPlayed()
+                    }
+                }
+            }
+            artist.videos.forEachIndexed { i, v ->
+                // 作品（アルバム・シリーズ）が変わるところに見出し
+                if (v.album.isNotBlank() && (i == 0 || artist.videos[i - 1].album != v.album)) {
+                    item { SectionHeader(v.album) }
+                }
+                item {
+                    VideoRow(vm, v, currentId, showArtist = false) {
+                        conn.playVideos(context, artist.videos, i)
+                        onPlayed()
+                    }
+                }
+            }
         }
     }
 }

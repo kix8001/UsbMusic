@@ -104,8 +104,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (sourceMode != Prefs.MODE_AUTO) return
             debounceJob?.cancel()
             debounceJob = viewModelScope.launch {
-                delay(4000)
-                rescan()
+                delay(3000)
+                requestRescan()
             }
         }
     }
@@ -127,6 +127,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var pendingRescan = false
+
+    /**
+     * USBを挿した直後は Android が登録作業中で「変更あり」が何度も届く。
+     * 読み込み中なら途中で止めずに、終わってからもう一度だけ読み込む（タグ読み込みが無駄にならない）
+     */
+    fun requestRescan() {
+        if (scanJob?.isActive == true) pendingRescan = true else rescan()
+    }
+
     fun rescan() {
         scanJob?.cancel()
         val generation = ++scanGeneration
@@ -135,9 +145,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             scanProgress = 0
             try {
                 val tracks = repo.scan { n -> viewModelScope.launch { scanProgress = n } }
-                library = withContext(Dispatchers.Default) { Library(tracks) }
+                // USBの準備がまだ（0曲）の間は、前回の一覧をそのまま表示しておく
+                val keepOld = tracks.isEmpty() && library.tracks.isNotEmpty()
+                if (!keepOld) library = withContext(Dispatchers.Default) { Library(tracks) }
                 ArtLoader.resetMissing()
-                videos = withContext(Dispatchers.Default) { SortKey.sorted(repo.scanVideos()) { it.title } }
+                val newVideos = repo.scanVideos()
+                if (newVideos.isNotEmpty() || videos.isEmpty() || !keepOld) {
+                    videos = withContext(Dispatchers.Default) { SortKey.sorted(newVideos) { it.sortTitle } }
+                }
                 videoReport = repo.videoReport
                 refreshVideoPositions()
                 // USBがライブラリに未登録なら、一度だけ自動でAndroidに登録を依頼する
@@ -159,6 +174,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Log.w("MainViewModel", "scan failed", e)
             } finally {
                 if (generation == scanGeneration) {
+                    if (pendingRescan) {
+                        pendingRescan = false
+                        viewModelScope.launch {
+                            delay(1500)
+                            rescan()
+                        }
+                    }
                     tagProgress = null
                     report = repo.report
                     scanning = false

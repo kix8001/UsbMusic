@@ -68,6 +68,8 @@ object TagReader {
                         TagInfo().also { id3(src, it) }
                     String(head, 0, 4, Charsets.ISO_8859_1) == "fLaC" -> TagInfo().also { flac(src, 4, it) }
                     String(head, 4, 4, Charsets.ISO_8859_1) == "ftyp" -> TagInfo().also { mp4(src, it) }
+                    u8(head[0]) == 0x1A && u8(head[1]) == 0x45 && u8(head[2]) == 0xDF && u8(head[3]) == 0xA3 ->
+                        TagInfo().also { mkv(src, it) }
                     else -> null
                 }
             }
@@ -292,6 +294,7 @@ object TagReader {
                 "soar" -> "artistsort"
                 "soaa" -> "albumartistsort"
                 "soal" -> "albumsort"
+                "tvsh" -> "album" // テレビ番組名（シリーズ）
                 else -> null
             } ?: continue
             val data = children(src, item.start, item.end).firstOrNull { it.type == "data" } ?: continue
@@ -302,6 +305,203 @@ object TagReader {
                 "trkn" -> if (payload.size >= 4) info.track = (u8(payload[2]) shl 8) or u8(payload[3])
                 "disk" -> if (payload.size >= 4) info.disc = (u8(payload[2]) shl 8) or u8(payload[3])
                 else -> assign(info, key, String(payload, Charsets.UTF_8).trim('\u0000').trim())
+            }
+        }
+    }
+
+    /** MP4/M4V に埋め込まれたカバー画像（動画のサムネイル用） */
+    fun mp4Cover(context: Context, uri: Uri): ByteArray? = runCatching {
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+            FileInputStream(pfd.fileDescriptor).channel.use { ch ->
+                val src = ChannelSrc(ch)
+                val head = src.read(0, 8) ?: return@use null
+                if (String(head, 4, 4, Charsets.ISO_8859_1) != "ftyp") return@use null
+                val moov = children(src, 0, src.size).firstOrNull { it.type == "moov" } ?: return@use null
+                val udta = children(src, moov.start, moov.end).firstOrNull { it.type == "udta" } ?: return@use null
+                val meta = children(src, udta.start, udta.end).firstOrNull { it.type == "meta" } ?: return@use null
+                val probe = src.read(meta.start + 4, 8)
+                val ms = if (probe != null && String(probe, 4, 4, Charsets.ISO_8859_1) == "hdlr") meta.start + 4 else meta.start
+                val ilst = children(src, ms, meta.end).firstOrNull { it.type == "ilst" } ?: return@use null
+                val covr = children(src, ilst.start, ilst.end).firstOrNull { it.type == "covr" } ?: return@use null
+                val data = children(src, covr.start, covr.end).firstOrNull { it.type == "data" } ?: return@use null
+                val len = (data.end - data.start - 8).toInt()
+                if (len <= 0 || len > 8 * 1024 * 1024) null else src.read(data.start + 8, len)
+            }
+        }
+    }.getOrNull()
+
+    // ---------------- MKV（Matroska） ----------------
+
+    private class Elem(val id: Long, val start: Long, val end: Long)
+
+    /** 要素ID（先頭ビットを含めたまま） */
+    private fun readId(src: Src, pos: Long): Pair<Long, Int>? {
+        val b0 = src.read(pos, 1)?.get(0)?.let { u8(it) } ?: return null
+        val len = when {
+            b0 and 0x80 != 0 -> 1
+            b0 and 0x40 != 0 -> 2
+            b0 and 0x20 != 0 -> 3
+            b0 and 0x10 != 0 -> 4
+            else -> return null
+        }
+        val b = src.read(pos, len) ?: return null
+        var v = 0L
+        for (x in b) v = (v shl 8) or u8(x).toLong()
+        return v to len
+    }
+
+    /** サイズ（先頭ビットを除く）。不明サイズは -1 */
+    private fun readSize(src: Src, pos: Long): Pair<Long, Int>? {
+        val b0 = src.read(pos, 1)?.get(0)?.let { u8(it) } ?: return null
+        var len = 1
+        var mask = 0x80
+        while (len <= 8 && b0 and mask == 0) {
+            len++
+            mask = mask shr 1
+        }
+        if (len > 8) return null
+        val b = src.read(pos, len) ?: return null
+        var v = (b0 and (mask - 1)).toLong()
+        var allOnes = v == (mask - 1).toLong()
+        for (i in 1 until len) {
+            v = (v shl 8) or u8(b[i]).toLong()
+            if (u8(b[i]) != 0xFF) allOnes = false
+        }
+        return (if (allOnes) -1L else v) to len
+    }
+
+    private fun elemAt(src: Src, pos: Long, limit: Long): Elem? {
+        val (id, il) = readId(src, pos) ?: return null
+        val (size, sl) = readSize(src, pos + il) ?: return null
+        val start = pos + il + sl
+        val end = if (size < 0) limit else start + size
+        if (end > limit || end < start) return null
+        return Elem(id, start, end)
+    }
+
+    private fun elems(src: Src, start: Long, end: Long, max: Int = 256): List<Elem> {
+        val out = ArrayList<Elem>()
+        var p = start
+        while (p < end && out.size < max) {
+            val e = elemAt(src, p, end) ?: break
+            out += e
+            if (e.end <= p) break
+            p = e.end
+        }
+        return out
+    }
+
+    private fun uint(src: Src, e: Elem): Long {
+        val n = (e.end - e.start).toInt()
+        if (n !in 1..8) return 0
+        val b = src.read(e.start, n) ?: return 0
+        var v = 0L
+        for (x in b) v = (v shl 8) or u8(x).toLong()
+        return v
+    }
+
+    private fun str(src: Src, e: Elem): String {
+        val n = (e.end - e.start).toInt()
+        if (n !in 1..MAX_FIELD) return ""
+        return String(src.read(e.start, n) ?: return "", Charsets.UTF_8).trim('\u0000').trim()
+    }
+
+    private const val MKV_SEGMENT = 0x18538067L
+    private const val MKV_SEEKHEAD = 0x114D9B74L
+    private const val MKV_INFO = 0x1549A966L
+    private const val MKV_TAGS = 0x1254C367L
+    private const val MKV_CLUSTER = 0x1F43B675L
+
+    private fun mkv(src: ChannelSrc, info: TagInfo) {
+        val header = elemAt(src, 0, src.size) ?: return
+        val seg = elemAt(src, header.end, src.size) ?: return
+        if (seg.id != MKV_SEGMENT) return
+        val targets = LinkedHashMap<Long, Long>() // 要素ID → 位置
+        var infoTitle = ""
+        var p = seg.start
+        var count = 0
+        // 先頭から順に見ていき、映像データ（Cluster）に着いたら目次（SeekHead）で残りを探す
+        while (p < seg.end && count++ < 64) {
+            val e = elemAt(src, p, seg.end) ?: break
+            when (e.id) {
+                MKV_SEEKHEAD -> for (seek in elems(src, e.start, e.end)) {
+                    var sid = 0L
+                    var spos = -1L
+                    for (c in elems(src, seek.start, seek.end)) {
+                        if (c.id == 0x53ABL) sid = uint(src, c)
+                        if (c.id == 0x53ACL) spos = uint(src, c)
+                    }
+                    if ((sid == MKV_INFO || sid == MKV_TAGS) && spos >= 0) targets.putIfAbsent(sid, seg.start + spos)
+                }
+                MKV_INFO -> {
+                    infoTitle = mkvInfoTitle(src, e)
+                    targets.remove(MKV_INFO)
+                }
+                MKV_TAGS -> {
+                    mkvTags(src, e, info)
+                    targets.remove(MKV_TAGS)
+                }
+                MKV_CLUSTER -> break
+            }
+            if (e.end <= p) break
+            p = e.end
+        }
+        for ((id, pos) in targets) {
+            val e = elemAt(src, pos, seg.end) ?: continue
+            if (e.id != id) continue
+            if (id == MKV_INFO) infoTitle = mkvInfoTitle(src, e) else mkvTags(src, e, info)
+        }
+        if (info.title.isEmpty() && infoTitle.isNotEmpty()) info.title = infoTitle
+    }
+
+    private fun mkvInfoTitle(src: Src, e: Elem): String =
+        elems(src, e.start, e.end).firstOrNull { it.id == 0x7BA9L }?.let { str(src, it) }.orEmpty()
+
+    private fun mkvTags(src: Src, tags: Elem, info: TagInfo) {
+        for (tag in elems(src, tags.start, tags.end)) {
+            if (tag.id != 0x7373L) continue
+            var level = 50L
+            val simple = ArrayList<Elem>()
+            for (c in elems(src, tag.start, tag.end)) {
+                if (c.id == 0x63C0L) {
+                    elems(src, c.start, c.end).firstOrNull { it.id == 0x68CAL }?.let { level = uint(src, it) }
+                } else if (c.id == 0x67C8L) simple += c
+            }
+            for (st in simple) {
+                var name = ""
+                var value = ""
+                var sort = ""
+                for (c in elems(src, st.start, st.end)) {
+                    when (c.id) {
+                        0x45A3L -> name = str(src, c).uppercase()
+                        0x4487L -> value = str(src, c)
+                        0x67C8L -> { // 入れ子の SORT_WITH（読み）
+                            var n2 = ""
+                            var v2 = ""
+                            for (d in elems(src, c.start, c.end)) {
+                                if (d.id == 0x45A3L) n2 = str(src, d).uppercase()
+                                if (d.id == 0x4487L) v2 = str(src, d)
+                            }
+                            if (n2 == "SORT_WITH") sort = v2
+                        }
+                    }
+                }
+                when (name) {
+                    // 70以上は「シリーズ・作品集」、それ未満は1本ごとのタイトル
+                    "TITLE" -> if (level >= 70) {
+                        assign(info, "album", value)
+                    } else {
+                        assign(info, "title", value)
+                        assign(info, "titlesort", sort)
+                    }
+                    "ARTIST", "DIRECTOR", "LEAD_PERFORMER" -> {
+                        assign(info, "artist", value)
+                        assign(info, "artistsort", sort)
+                    }
+                    "ALBUM" -> assign(info, "album", value)
+                    "ARTISTSORT" -> assign(info, "artistsort", value)
+                    "TITLESORT" -> assign(info, "titlesort", value)
+                }
             }
         }
     }

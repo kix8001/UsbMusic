@@ -108,7 +108,7 @@ class PlayerConnection(private val context: Context) {
         val c = controller ?: return
         if (videos.isEmpty()) return
         val index = start.coerceIn(0, videos.size - 1)
-        val resume = VideoPositions.get(context, videos[index].uri)?.first ?: 0L
+        val resume = VideoPositions.get(context, videos[index].key)?.first ?: 0L
         c.trackSelectionParameters = c.trackSelectionParameters.buildUpon()
             .clearOverrides()
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)

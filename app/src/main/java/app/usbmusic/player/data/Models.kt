@@ -59,10 +59,16 @@ data class Track(
 
     val sortTitle: String get() = titleSort.ifBlank { title }
 
+    /** USBの差し込み口（ボリューム名）を除いたフォルダ。挿し直しても変わらない */
+    val folderNoVol: String get() = if (fromMediaStore) folder.substringAfter('/') else folder
+
+    /** 挿し直しても変わらない、曲を見分けるためのキー */
+    val pathKey: String get() = folderNoVol + fileName
+
     /** 同じアルバムかどうかを判定するキー */
     val albumKey: String =
         if (albumArtist.isNotBlank()) "aa:${albumArtist.lowercase()}|${album.lowercase()}"
-        else "f:${album.lowercase()}|${albumFolder(folder)}"
+        else "f:${album.lowercase()}|${albumFolder(if (fromMediaStore) folder.substringAfter('/') else folder)}"
 
     companion object {
         fun fromItem(item: MediaItem): Track {
@@ -80,17 +86,32 @@ data class Track(
     }
 }
 
-/** 動画1本分の情報（ファイル名で並べる） */
+/** 動画1本分の情報。IDタグ（タイトル・アーティスト等）があればそれを使い、無ければファイル名 */
 data class Video(
     val uri: String,
+    /** 表示用のタイトル（タグのタイトル、無ければファイル名） */
     val title: String,
     val folder: String,
     val durationMs: Long,
     val lastModified: Long,
     /** 同じ名前の字幕ファイル（.srt / .ass など。フォルダ指定モードのみ） */
     val subtitles: List<String> = emptyList(),
+    val fromMediaStore: Boolean = true,
+    /** 拡張子を除いたファイル名 */
+    val fileTitle: String = title,
+    val artist: String = "",
+    val album: String = "",
+    val titleSort: String = "",
+    val artistSort: String = "",
+    val tagsRead: Boolean = false,
 ) {
     val folderName: String get() = folder.trimEnd('/').substringAfterLast('/')
+
+    /** 挿し直しても変わらない、動画を見分けるためのキー（続きから再生・サムネイルに使う） */
+    val key: String get() = (if (fromMediaStore) folder.substringAfter('/') else folder) + fileTitle
+
+    val sortTitle: String get() = titleSort.ifBlank { title }
+    val sortArtist: String get() = artistSort.ifBlank { artist }
 }
 
 class Album(

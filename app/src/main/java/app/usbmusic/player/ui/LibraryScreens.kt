@@ -108,6 +108,7 @@ fun ArtistsScreen(
         state = state,
         jumpRequested = jumpRequested,
         onJumpHandled = onJumpHandled,
+        showRail = false, // アーティストは左メニューの「A2Z」から
         extraJump = onVideos?.let { "動画" to it },
         header = { ScreenTitle("アーティスト") },
     ) { _, artist ->

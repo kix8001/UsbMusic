@@ -11,8 +11,15 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -106,23 +113,37 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
     }
 
     /** まだタグを読んでいない曲のタグを読む（初回のみ。2回目以降はキャッシュを使う） */
+    /** 読んだタグをすぐ覚えておく（途中で読み込みがやり直しになっても無駄にしない） */
+    private val tagMemo = ConcurrentHashMap<String, Track>()
+
     suspend fun enrich(tracks: List<Track>, progress: (Int, Int) -> Unit): List<Track> = withContext(Dispatchers.IO) {
         val todo = tracks.count { !it.tagsRead }
-        var done = 0
-        tracks.map { t ->
-            if (t.tagsRead) t else {
-                ensureActive()
-                val r = applyTags(t, TagReader.read(context, Uri.parse(t.uri)))
-                done++
-                if (done % 20 == 0) progress(done, todo)
-                r
-            }
+        val done = AtomicInteger()
+        val gate = Semaphore(4) // USBから同時に4曲ずつ読む
+        coroutineScope {
+            tracks.map { t ->
+                if (t.tagsRead) CompletableDeferred(t) else async {
+                    gate.withPermit {
+                        ensureActive()
+                        val r = applyTags(t, TagReader.read(context, Uri.parse(t.uri)))
+                        tagMemo[t.pathKey] = r
+                        val d = done.incrementAndGet()
+                        if (d % 20 == 0) progress(d, todo)
+                        r
+                    }
+                }
+            }.awaitAll()
         }
     }
 
     /** 前回読んだタグ情報を引き継ぐ（ファイルが変わっていなければ） */
-    private fun mergeCached(fresh: List<Track>, cached: Map<String, Track>): List<Track> = fresh.map { t ->
-        val c = cached[t.uri]
+    private fun mergeCached(fresh: List<Track>, cachedList: Collection<Track>): List<Track> {
+        val cached = HashMap<String, Track>(cachedList.size * 2)
+        for (c in cachedList) cached[c.pathKey] = c
+        return fresh.map { t -> mergeOne(t, tagMemo[t.pathKey]?.takeIf { it.lastModified == t.lastModified } ?: cached[t.pathKey]) }
+    }
+
+    private fun mergeOne(t: Track, c: Track?): Track =
         if (c != null && c.tagsRead && c.lastModified == t.lastModified) {
             t.copy(
                 title = c.title, artist = c.artist, albumArtist = c.albumArtist, album = c.album,
@@ -131,7 +152,6 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                 albumArtistSort = c.albumArtistSort, albumSort = c.albumSort, tagsRead = true,
             )
         } else t
-    }
 
     // ---------- 動画 ----------
 
@@ -144,7 +164,45 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
     private val folderSubs = HashMap<String, String>()
 
     /** 動画の一覧（音楽の読み込みの後に呼ぶ） */
-    suspend fun scanVideos(): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun scanVideos(): List<Video> = withContext(Dispatchers.IO) { enrichVideos(listVideos()) }
+
+    // 動画のタグはファイルの更新日時ごとに記録しておき、変わっていなければ読み直さない
+    private val videoCacheFile = File(context.filesDir, "videos.json")
+
+    private fun enrichVideos(list: List<Video>): List<Video> {
+        val cache = runCatching {
+            if (videoCacheFile.exists()) JSONObject(videoCacheFile.readText()) else JSONObject()
+        }.getOrDefault(JSONObject())
+        val out = list.map { v ->
+            val c = cache.optJSONArray(v.key)
+            if (c != null && c.optLong(0) == v.lastModified) {
+                v.copy(
+                    title = c.optString(1).ifBlank { v.title }, artist = c.optString(2), album = c.optString(3),
+                    titleSort = c.optString(4), artistSort = c.optString(5), tagsRead = true,
+                )
+            } else {
+                val info = TagReader.read(context, Uri.parse(v.uri))
+                val r = if (info == null) v.copy(tagsRead = true) else v.copy(
+                    title = info.title.ifBlank { v.title },
+                    artist = info.artist.ifBlank { info.albumArtist },
+                    album = info.album,
+                    titleSort = info.titleSort,
+                    artistSort = info.artistSort.ifBlank { info.albumArtistSort },
+                    tagsRead = true,
+                )
+                cache.put(
+                    v.key,
+                    JSONArray().put(v.lastModified).put(if (r.title == v.fileTitle) "" else r.title)
+                        .put(r.artist).put(r.album).put(r.titleSort).put(r.artistSort),
+                )
+                r
+            }
+        }
+        runCatching { videoCacheFile.writeText(cache.toString()) }
+        return out
+    }
+
+    private fun listVideos(): List<Video> = run {
         if (prefs.sourceMode == Prefs.MODE_FOLDER) {
             val tree = prefs.treeUri?.let { runCatching { DocumentsContract.getTreeDocumentId(Uri.parse(it)) }.getOrNull() }
             videoReport = "フォルダ指定モード：「$tree」の中に動画 ${folderVideoFiles.size}本"
@@ -154,7 +212,7 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                 val subs = folderSubs.filterKeys { key ->
                     key.startsWith(f.folder + stem + ".")
                 }.toSortedMap().values.toList()
-                Video(f.uri, f.name.substringBeforeLast('.'), f.folder, 0L, f.lastModified, subs)
+                Video(f.uri, f.name.substringBeforeLast('.'), f.folder, 0L, f.lastModified, subs, fromMediaStore = false)
             }
         } else {
             val out = ArrayList<Video>()
@@ -232,7 +290,7 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                 }
             } else {
                 volumeReport(log)
-                val fromStore = mergeCached(scanMediaStore(log), cachedAll)
+                val fromStore = mergeCached(scanMediaStore(log), cachedAll.values)
                 val usbCount = fromStore.count { !it.folder.startsWith(MediaStore.VOLUME_EXTERNAL_PRIMARY + "/") }
                 if (usbCount > 0) {
                     fromStore

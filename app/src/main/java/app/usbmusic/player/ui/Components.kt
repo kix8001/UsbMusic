@@ -369,6 +369,7 @@ fun <T> IndexedList(
     jumpRequested: Boolean = false,
     onJumpHandled: () -> Unit = {},
     extraJump: Pair<String, () -> Unit>? = null,
+    showRail: Boolean = true,
     header: @Composable () -> Unit,
     row: @Composable (Int, T) -> Unit,
 ) {
@@ -399,7 +400,7 @@ fun <T> IndexedList(
 
     Box(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize()) {
-            if (groups.size > 1) {
+            if (showRail && groups.size > 1) {
                 JumpRail(onUp = { page(-1) }, onJump = { showJump = true }, onDown = { page(1) })
             }
             LazyColumn(

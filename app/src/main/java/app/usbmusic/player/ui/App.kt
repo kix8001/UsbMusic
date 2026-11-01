@@ -49,6 +49,7 @@ sealed interface Screen {
     data object Search : Screen { override val key = "search" }
     data object Settings : Screen { override val key = "settings" }
     data object Videos : Screen { override val key = "videos" }
+    data class VideoArtist(val name: String) : Screen { override val key: String get() = "vartist:$name" }
     data class ArtistDetail(val name: String) : Screen { override val key: String get() = "artist:$name" }
     data class AlbumDetail(val albumKey: String) : Screen { override val key: String get() = "album:$albumKey" }
 }
@@ -217,7 +218,8 @@ private fun ScreenContent(
             onJumpHandled = { vm.jumpHandled() },
             onVideos = { open(NavTab.VIDEOS, null) },
         ) { push(Screen.ArtistDetail(it)) }
-        Screen.Videos -> VideosScreen(vm, conn) { open(NavTab.NOW, null) }
+        Screen.Videos -> VideosScreen(vm, conn, onArtist = { push(Screen.VideoArtist(it)) }) { open(NavTab.NOW, null) }
+        is Screen.VideoArtist -> VideoArtistScreen(vm, conn, screen.name, onBack = pop) { open(NavTab.NOW, null) }
         Screen.Albums -> AlbumsScreen(lib) { push(Screen.AlbumDetail(it)) }
         Screen.Songs -> SongsScreen(lib, conn)
         Screen.Search -> SearchScreen(

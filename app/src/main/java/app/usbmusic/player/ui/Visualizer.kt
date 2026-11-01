@@ -1083,6 +1083,39 @@ private fun textToDots(text: String): Pair<Int, BooleanArray> {
     return w to BooleanArray(px.size) { (px[it] ushr 24) > 100 }
 }
 
+/** ドット文字の左右の空白の列を取り除く */
+private fun trimDots(d: Pair<Int, BooleanArray>): Pair<Int, BooleanArray> {
+    val (w, b) = d
+    if (w == 0) return d
+    fun colEmpty(c: Int) = (0 until DOT_ROWS).none { b[it * w + c] }
+    var l = 0
+    while (l < w - 1 && colEmpty(l)) l++
+    var r = w - 1
+    while (r > l && colEmpty(r)) r--
+    val nw = r - l + 1
+    return nw to BooleanArray(nw * DOT_ROWS) { i -> b[(i / nw) * w + l + i % nw] }
+}
+
+/** 台形の辺の傾きに合わせて斜めにした文字（左寄せ）。単位は小さく添える */
+private fun DrawScope.slantLabel(main: String, unit: String, x: Float, y: Float, color: Color, sizePx: Float, skew: Float) {
+    drawIntoCanvas {
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color.toArgb()
+            textSize = sizePx
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            textAlign = Paint.Align.LEFT
+            textSkewX = skew
+        }
+        it.nativeCanvas.drawText(main, x, y, p)
+        if (unit.isNotEmpty()) {
+            val w = p.measureText(main)
+            p.textSize = sizePx * 0.72f
+            p.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+            it.nativeCanvas.drawText(unit, x + w + sizePx * 0.12f, y, p)
+        }
+    }
+}
+
 private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     drawRect(Color(0xFF050608))
     val w = size.width
@@ -1103,8 +1136,9 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     if (time != m.timeStr) {
         m.timeStr = time
         // 数字はドットフォント、「:」は数字と同じドット1つずつを上下に（昔の時計表示のように）
-        val parts = time.split(':').map { textToDots(it) }
-        val colonW = 3
+        // 文字の左右の余白を除いて、「:」が分と秒のちょうど真ん中に来るようにする
+        val parts = time.split(':').map { trimDots(textToDots(it)) }
+        val colonW = 5
         val totalW = parts.sumOf { it.first } + colonW * (parts.size - 1)
         val bits = BooleanArray(totalW * DOT_ROWS)
         val colons = ArrayList<Int>()
@@ -1115,8 +1149,8 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
             if (idx < parts.size - 1) {
                 colons += x0
                 // 数字の高さ（2〜10段目）の中で上下対称に、ドット1つずつ
-                bits[4 * totalW + x0 + 1] = true
-                bits[8 * totalW + x0 + 1] = true
+                bits[4 * totalW + x0 + 2] = true
+                bits[8 * totalW + x0 + 2] = true
                 x0 += colonW
             }
         }
@@ -1231,9 +1265,11 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
 
     // ---- 文字のギミック ----
     val small = min(h * 0.07f, baseW / n * 0.55f)
-    label("MAX", x(0.5f, top) + small * 1.6f, top + small * 0.4f, VfdCyan.copy(alpha = 0.8f), small)
-    label("-6", x(0.56f, ys[7]) + small * 1.2f, ys[7] + small * 0.35f, VfdCyan.copy(alpha = 0.6f), small * 0.85f, bold = false)
-    label("-12", x(0.56f, ys[3]) + small * 1.4f, ys[3] + small * 0.35f, VfdCyan.copy(alpha = 0.6f), small * 0.85f, bold = false)
+    // 右の辺と同じ傾きで文字を斜めにする（上ほど左へ寄る）
+    val slant = ((x(0.5f, floorY) - x(0.5f, top)) / total).coerceIn(0f, 0.8f)
+    slantLabel("MAX", "", x(0.5f, top) + small * 0.5f, top + small * 0.4f, VfdCyan.copy(alpha = 0.85f), small * 1.05f, slant)
+    slantLabel("-6", "dB", x(0.56f, ys[7]) + small * 0.5f, ys[7] + small * 0.35f, VfdCyan.copy(alpha = 0.7f), small, slant)
+    slantLabel("-12", "dB", x(0.56f, ys[3]) + small * 0.5f, ys[3] + small * 0.35f, VfdCyan.copy(alpha = 0.7f), small, slant)
     val freqs = listOf("50", "125", "250", "630", "1.5k", "3.5k", "8k")
     for ((k, f) in freqs.withIndex()) {
         val u = -0.5f + (k * 2 + 1f) / n

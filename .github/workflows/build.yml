@@ -24,6 +24,11 @@ jobs:
           set -o pipefail
           ./gradlew assembleRelease 2>&1 | tee build.log
 
+      - name: Check FFmpeg in APK
+        run: |
+          unzip -l app/build/outputs/apk/release/*.apk | grep -i "ffmpeg" | awk '{print $4}' | tr '\n' ' ' | sed 's/^/::notice::APK ffmpeg: /'
+          echo
+
       - name: Report errors
         if: failure()
         run: |

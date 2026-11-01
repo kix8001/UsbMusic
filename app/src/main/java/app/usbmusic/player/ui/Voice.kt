@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,12 +33,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.usbmusic.player.MainViewModel
 import app.usbmusic.player.data.SortKey
+import app.usbmusic.player.playback.ItemGains
+import app.usbmusic.player.playback.MediaItems
 import app.usbmusic.player.playback.PlayerConnection
+import app.usbmusic.player.playback.VolumeLeveler
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -268,5 +274,65 @@ fun VolumeSlider(modifier: Modifier = Modifier, light: Boolean = false) {
         IconButton(onClick = { set(vol + 1) }, modifier = Modifier.size(44.dp)) {
             Icon(Icons.Filled.VolumeUp, contentDescription = "音量を上げる", tint = tint, modifier = Modifier.size(28.dp))
         }
+    }
+}
+
+// ---------------- この曲・動画だけの音量 ----------------
+
+/** 「この曲 ±0dB」ボタン。押すと、この曲だけの音量を上げ下げできる（曲ごとに記憶） */
+@Composable
+fun ItemGainButton(conn: PlayerConnection) {
+    val context = LocalContext.current
+    val item = conn.current ?: return
+    val key = remember(item.mediaId) { MediaItems.keyOf(item) }
+    var db by remember(key) { mutableIntStateOf(ItemGains.get(context, key)) }
+    var open by remember { mutableStateOf(false) }
+    val what = if (conn.isVideo) "この動画" else "この曲"
+    fun change(v: Int) {
+        db = v.coerceIn(-12, 12)
+        ItemGains.put(context, key, db)
+        VolumeLeveler.itemGain = ItemGains.linear(db)
+    }
+    val label = if (db > 0) "+${db}dB" else "${db}dB"
+    Box(
+        Modifier.height(44.dp).clip(RoundedCornerShape(10.dp)).background(Pal.Surface2)
+            .clickable { open = true }.padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("$what $label", color = if (db != 0) Pal.Accent else Pal.Sub, fontSize = 15.sp, maxLines = 1, softWrap = false)
+    }
+    if (open) {
+        Dialog(onDismissRequest = { open = false }) {
+            Column(
+                Modifier.clip(RoundedCornerShape(16.dp)).background(Pal.Surface).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("${what}だけの音量", color = Pal.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "次に再生した時も覚えています。「音量を一定にする」と一緒に使えます。",
+                    color = Pal.Sub, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    GainStep("−", 72.dp) { change(db - 1) }
+                    Text(label, color = Pal.Text, fontSize = 34.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(140.dp), textAlign = TextAlign.Center)
+                    GainStep("＋", 72.dp) { change(db + 1) }
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    PillButton(Icons.Filled.VolumeDown, "元に戻す") { change(0) }
+                    PillButton(Icons.Filled.Mic, "閉じる") { open = false }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GainStep(text: String, size: Dp, onClick: () -> Unit) {
+    Box(
+        Modifier.size(size).clip(CircleShape).background(Pal.Surface2).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = Pal.Accent, fontSize = 34.sp, fontWeight = FontWeight.Bold)
     }
 }

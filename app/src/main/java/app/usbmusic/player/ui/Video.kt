@@ -75,7 +75,15 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.common.text.CueGroup
+import android.view.Gravity
+import android.view.TextureView
+import android.widget.FrameLayout
+import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.graphics.graphicsLayer
 import app.usbmusic.player.MainViewModel
 import app.usbmusic.player.data.SortKey
 import app.usbmusic.player.data.TagReader
@@ -92,30 +100,89 @@ import java.security.MessageDigest
 
 // ---------------- 動画の表示面 ----------------
 
+/** 動画の表示面を構成する部品（最後のコマを取り出すために TextureView を使う） */
+class VideoViews {
+    var texture: TextureView? = null
+    var frame: AspectRatioFrameLayout? = null
+    var subtitles: SubtitleView? = null
+    var attached: Player? = null
+    var listener: Player.Listener? = null
+
+    fun attach(player: Player?) {
+        if (attached === player) return
+        detach()
+        val tv = texture ?: return
+        if (player == null) return
+        player.setVideoTextureView(tv)
+        val l = object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: VideoSize) = applySize(videoSize)
+            override fun onCues(cueGroup: CueGroup) {
+                subtitles?.setCues(cueGroup.cues)
+            }
+        }
+        player.addListener(l)
+        applySize(player.videoSize)
+        subtitles?.setCues(player.currentCues.cues)
+        attached = player
+        listener = l
+    }
+
+    fun detach() {
+        val p = attached ?: return
+        listener?.let { p.removeListener(it) }
+        texture?.let { p.clearVideoTextureView(it) }
+        attached = null
+        listener = null
+    }
+
+    private fun applySize(v: VideoSize) {
+        if (v.width > 0 && v.height > 0) frame?.setAspectRatio(v.width * v.pixelWidthHeightRatio / v.height)
+    }
+
+    /** 今映っているコマを画像として取り出す（クロスディゾルブ用） */
+    fun capture(): Bitmap? {
+        val tv = texture ?: return null
+        if (!tv.isAvailable || tv.width <= 0) return null
+        return runCatching { tv.getBitmap(tv.width / 2, tv.height / 2) }.getOrNull()
+    }
+}
+
 /** 動画を映す面。字幕もここに表示される */
 @OptIn(UnstableApi::class)
 @Composable
-fun VideoSurface(conn: PlayerConnection, modifier: Modifier = Modifier, large: Boolean = false) {
+fun VideoSurface(
+    conn: PlayerConnection,
+    modifier: Modifier = Modifier,
+    large: Boolean = false,
+    views: VideoViews = remember { VideoViews() },
+) {
     val controller = conn.controller
     AndroidView(
         factory = { ctx ->
-            PlayerView(ctx).apply {
-                useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                setShutterBackgroundColor(android.graphics.Color.BLACK)
-                setKeepContentOnPlayerReset(true)
-                subtitleView?.setApplyEmbeddedStyles(true)
-                subtitleView?.setFractionalTextSize(if (large) 0.06f else 0.075f)
+            val root = FrameLayout(ctx).apply { setBackgroundColor(android.graphics.Color.BLACK) }
+            val arf = AspectRatioFrameLayout(ctx).apply { resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT }
+            val tv = TextureView(ctx)
+            arf.addView(tv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            root.addView(arf, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER))
+            val sub = SubtitleView(ctx).apply {
+                setUserDefaultStyle()
+                setApplyEmbeddedStyles(true)
+                setFractionalTextSize(if (large) 0.06f else 0.075f)
             }
+            root.addView(sub, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            views.texture = tv
+            views.frame = arf
+            views.subtitles = sub
+            root
         },
-        update = { if (it.player !== controller) it.player = controller },
-        onRelease = { it.player = null },
+        update = { views.attach(controller) },
+        onRelease = { views.detach() },
         modifier = modifier.background(Color.Black),
     )
 }
 
 /**
- * 動画の表示面に、切り替え時のフェードと、最初の10秒間のタイトル・アーティスト表示を重ねたもの
+ * 動画の表示面に、切り替え時のクロスディゾルブと、最初の10秒間のタイトル・アーティスト表示を重ねたもの
  */
 @Composable
 fun VideoLayer(
@@ -125,22 +192,50 @@ fun VideoLayer(
     modifier: Modifier = Modifier,
     large: Boolean = false,
 ) {
+    val views = remember { VideoViews() }
     Box(modifier) {
-        VideoSurface(conn, Modifier.fillMaxSize(), large)
+        VideoSurface(conn, Modifier.fillMaxSize(), large, views)
         val id = conn.current?.mediaId
         val changedAt = conn.itemChangedAt
         if (fade) {
-            var alpha by remember { mutableFloatStateOf(0f) }
-            LaunchedEffect(id, changedAt) {
+            // 終わり際のコマを取っておき、次の動画に切り替わったら上に重ねて溶かしていく
+            var lastFrame by remember { mutableStateOf<Bitmap?>(null) }
+            var dissolveFrame by remember { mutableStateOf<ImageBitmap?>(null) }
+            val dissolveAlpha = remember { Animatable(0f) }
+            var prevId by remember { mutableStateOf(id) }
+            LaunchedEffect(Unit) {
                 while (true) {
-                    val level = if (conn.isPlaying) {
-                        fadeLevel(SystemClock.elapsedRealtime() - changedAt, conn.position, conn.duration)
-                    } else 1f
-                    alpha = 1f - level
-                    delay(33)
+                    val dur = conn.duration
+                    val left = dur - conn.position
+                    if (conn.isVideo && conn.isPlaying && dur > 0 && left in 0..450) {
+                        views.capture()?.let { lastFrame = it }
+                    }
+                    delay(60)
                 }
             }
-            if (alpha > 0.01f) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = alpha)))
+            LaunchedEffect(id) {
+                if (prevId != null && id != prevId) {
+                    val frame = lastFrame ?: views.capture()
+                    lastFrame = null
+                    prevId = id
+                    if (frame != null && conn.isVideo) {
+                        dissolveFrame = frame.asImageBitmap()
+                        dissolveAlpha.snapTo(1f)
+                        delay(150) // 次の動画の最初のコマが出るのを待つ
+                        dissolveAlpha.animateTo(0f, tween(1400))
+                        dissolveFrame = null
+                    }
+                } else {
+                    prevId = id
+                }
+            }
+            dissolveFrame?.let { img ->
+                Image(
+                    img, contentDescription = null,
+                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = dissolveAlpha.value },
+                    contentScale = ContentScale.Fit,
+                )
+            }
         }
         if (titles && id != null) {
             var show by remember { mutableStateOf(false) }

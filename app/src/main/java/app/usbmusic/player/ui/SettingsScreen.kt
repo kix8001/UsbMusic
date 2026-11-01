@@ -70,7 +70,7 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         SwitchRow("音量を一定にする（曲・動画ごとの音量差をそろえる）", vm.leveler) { vm.changeLeveler(it) }
 
         SectionHeader("動画")
-        SwitchRow("次の動画へ切り替わる時にフェードする", vm.videoFade) { vm.changeVideoFade(it) }
+        SwitchRow("次の動画へ切り替わる時にクロスディゾルブする", vm.videoFade) { vm.changeVideoFade(it) }
         SwitchRow("再生の最初の10秒にタイトルとアーティストを表示", vm.videoTitles) { vm.changeVideoTitles(it) }
 
         SectionHeader("ビジュアライザー（再生中画面）")
@@ -101,7 +101,7 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         ActionRow("アルバムアートを読み込み直す") { vm.clearArtCache() }
 
         SectionHeader("このアプリについて")
-        InfoRow("mTunes 0.6.0")
+        InfoRow("mTunes 0.6.1")
     }
 }
 

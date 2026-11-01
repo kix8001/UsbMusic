@@ -26,6 +26,9 @@ object PlaybackOptions {
 object VolumeLeveler : BaseAudioProcessor() {
     @Volatile var enabled = true
 
+    /** いま再生中の曲・動画だけに掛ける音量（1.0 = そのまま）。曲ごとに記憶される */
+    @Volatile var itemGain = 1f
+
     private const val TARGET_RMS = 0.14f       // 目標の音の大きさ（約 -17 dBFS）
     private const val MAX_GAIN = 4.0f          // 最大 +12 dB
     private const val MIN_GAIN = 0.25f         // 最大 -12 dB
@@ -57,7 +60,8 @@ object VolumeLeveler : BaseAudioProcessor() {
         val remaining = inputBuffer.remaining()
         if (remaining == 0) return
         val out = replaceOutputBuffer(remaining)
-        if (!enabled) {
+        val extra = itemGain
+        if (!enabled && extra == 1f) {
             out.put(inputBuffer)
             out.flip()
             gain = 1f
@@ -80,12 +84,18 @@ object VolumeLeveler : BaseAudioProcessor() {
             val ms = (sum / (n * channels)).toFloat()
             env += (ms - env) * (if (ms > env) envUp else envDown)
             val rms = sqrt(env)
-            val target = if (rms < SILENCE) gain else (TARGET_RMS / rms).coerceIn(MIN_GAIN, MAX_GAIN)
-            val from = gain
-            gain += (target - gain) * (if (target < gain) attackCoef else releaseCoef)
+            val from: Float
+            if (enabled) {
+                val target = if (rms < SILENCE) gain else (TARGET_RMS / rms).coerceIn(MIN_GAIN, MAX_GAIN)
+                from = gain
+                gain += (target - gain) * (if (target < gain) attackCoef else releaseCoef)
+            } else {
+                gain = 1f
+                from = 1f
+            }
             // ゲインをブロック内でなめらかに変えながら掛け、はみ出しそうな音は柔らかく抑える
             for (i in 0 until n) {
-                val g = from + (gain - from) * (i + 1) / n
+                val g = (from + (gain - from) * (i + 1) / n) * extra
                 for (c in 0 until channels) {
                     val x = inp.short / 32768f * g
                     out.putShort((limit(x) * 32767f).toInt().toShort())
@@ -114,4 +124,18 @@ fun fadeLevel(sinceStartMs: Long, positionMs: Long, durationMs: Long): Float {
     val fin = (sinceStartMs / 800f).coerceIn(0f, 1f)
     val fout = if (durationMs > 0) ((durationMs - positionMs) / 1200f).coerceIn(0f, 1f) else 1f
     return minOf(fin, fout)
+}
+
+/** 曲・動画ごとの音量（dB）を覚えておく */
+object ItemGains {
+    private fun sp(context: android.content.Context) =
+        context.getSharedPreferences("item_gain", android.content.Context.MODE_PRIVATE)
+
+    fun get(context: android.content.Context, key: String): Int = sp(context).getInt(key, 0)
+
+    fun put(context: android.content.Context, key: String, db: Int) {
+        if (db == 0) sp(context).edit().remove(key).apply() else sp(context).edit().putInt(key, db).apply()
+    }
+
+    fun linear(db: Int): Float = Math.pow(10.0, db / 20.0).toFloat()
 }

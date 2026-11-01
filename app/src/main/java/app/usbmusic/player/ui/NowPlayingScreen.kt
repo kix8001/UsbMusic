@@ -218,6 +218,7 @@ private fun PlayerPanel(
             voice()
             Spacer(Modifier.width(8.dp))
             VolumeSlider(Modifier.weight(1f))
+            ItemGainButton(conn)
         }
         if (video) {
             Spacer(Modifier.height(6.dp))

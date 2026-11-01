@@ -101,6 +101,7 @@ class PlaybackService : MediaSessionService() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 itemStart = SystemClock.elapsedRealtime()
+                applyItemGain()
                 flushVideo()
                 trackVideo()
                 savePosition()
@@ -133,6 +134,7 @@ class PlaybackService : MediaSessionService() {
         })
 
         restoreState()
+        applyItemGain()
         handler.postDelayed(periodicSave, 10_000)
         handler.postDelayed(videoTick, 1_000)
         handler.post(fadeTick)
@@ -170,6 +172,12 @@ class PlaybackService : MediaSessionService() {
             val resolved = mediaItems.map { MediaItems.withLocal(it) }
             return Futures.immediateFuture(resolved.toMutableList())
         }
+    }
+
+    /** この曲・動画だけの音量（記憶してある分）を適用 */
+    private fun applyItemGain() {
+        val item = player.currentMediaItem
+        VolumeLeveler.itemGain = if (item == null) 1f else ItemGains.linear(ItemGains.get(this, MediaItems.keyOf(item)))
     }
 
     // ---------- 動画の切り替え時のフェード（音） ----------

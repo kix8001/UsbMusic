@@ -12,7 +12,7 @@ object MediaItems {
     private const val KEY_SUBS = "subs"
     private const val KEY_VKEY = "vkey"
 
-    fun from(t: Track): MediaItem = build(t.uri, t.title, t.displayArtist, t.album, t.albumArtist)
+    fun from(t: Track): MediaItem = build(t.uri, t.title, t.displayArtist, t.album, t.albumArtist, videoKey = t.pathKey.ifBlank { null })
 
     fun from(v: Video): MediaItem = build(
         v.uri, v.title, v.artist.ifBlank { v.folderName.ifBlank { "動画" } }, v.album.ifBlank { null }, null,
@@ -46,6 +46,9 @@ object MediaItems {
     }
 
     fun isVideo(item: MediaItem?): Boolean = item?.mediaMetadata?.mediaType == MediaMetadata.MEDIA_TYPE_VIDEO
+
+    /** 挿し直しても変わらないキー（動画の続きから再生・曲ごとの音量に使う） */
+    fun keyOf(item: MediaItem): String = videoKeyOf(item)
 
     /** 動画の「続きから再生」用のキー */
     fun videoKeyOf(item: MediaItem): String = item.mediaMetadata.extras?.getString(KEY_VKEY) ?: item.mediaId

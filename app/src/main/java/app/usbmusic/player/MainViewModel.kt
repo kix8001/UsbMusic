@@ -74,18 +74,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         PlaybackOptions.videoFade = prefs.videoFade
     }
 
-    fun setVideoFade(on: Boolean) {
+    fun changeVideoFade(on: Boolean) {
         videoFade = on
         prefs.videoFade = on
         PlaybackOptions.videoFade = on
     }
 
-    fun setVideoTitles(on: Boolean) {
+    fun changeVideoTitles(on: Boolean) {
         videoTitles = on
         prefs.videoTitles = on
     }
 
-    fun setLeveler(on: Boolean) {
+    fun changeLeveler(on: Boolean) {
         leveler = on
         prefs.leveler = on
         VolumeLeveler.enabled = on

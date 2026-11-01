@@ -67,11 +67,11 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         }
 
         SectionHeader("音量")
-        SwitchRow("音量を一定にする（曲・動画ごとの音量差をそろえる）", vm.leveler) { vm.setLeveler(it) }
+        SwitchRow("音量を一定にする（曲・動画ごとの音量差をそろえる）", vm.leveler) { vm.changeLeveler(it) }
 
         SectionHeader("動画")
-        SwitchRow("次の動画へ切り替わる時にフェードする", vm.videoFade) { vm.setVideoFade(it) }
-        SwitchRow("再生の最初の10秒にタイトルとアーティストを表示", vm.videoTitles) { vm.setVideoTitles(it) }
+        SwitchRow("次の動画へ切り替わる時にフェードする", vm.videoFade) { vm.changeVideoFade(it) }
+        SwitchRow("再生の最初の10秒にタイトルとアーティストを表示", vm.videoTitles) { vm.changeVideoTitles(it) }
 
         SectionHeader("ビジュアライザー（再生中画面）")
         VisStyle.entries.forEach { st ->

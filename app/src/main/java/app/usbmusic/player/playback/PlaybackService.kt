@@ -43,6 +43,7 @@ class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private val handler = Handler(Looper.getMainLooper())
     private var errorStreak = 0
+    private var retryIndex = -1
 
     private val periodicSave = object : Runnable {
         override fun run() {
@@ -108,7 +109,11 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) errorStreak = 0 else {
+                if (isPlaying) {
+                    errorStreak = 0
+                    // しばらく正常に再生できたら、次の一時的なエラーでも再生し直せるようにする
+                    handler.postDelayed({ if (player.isPlaying) retryIndex = -1 }, 5_000)
+                } else {
                     trackVideo()
                     flushVideo()
                     savePosition()
@@ -124,6 +129,21 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                val index = player.currentMediaItemIndex
+                val pos = player.currentPosition
+                val fileProblem = error.errorCode in 2000..3999 // ファイルが読めない・壊れている
+                // 画面の切り替え（スマホ⇔タブレット表示）で映像の表示面が作り直された時などの一時的なエラーは、
+                // 次へ飛ばさずに同じ位置から再生し直す
+                if (!fileProblem && retryIndex != index) {
+                    retryIndex = index
+                    handler.postDelayed({
+                        player.seekTo(index, pos)
+                        player.prepare()
+                        player.play()
+                    }, 300)
+                    return
+                }
+                retryIndex = -1
                 // 読めないファイル（USBが抜けた・壊れたファイル等）は飛ばして次へ
                 if (errorStreak < 5 && player.hasNextMediaItem()) {
                     errorStreak++

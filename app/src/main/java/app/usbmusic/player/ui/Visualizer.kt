@@ -1122,7 +1122,9 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     val h = size.height
 
     // ---- 上段：ドット文字（曲名 / アーティスト）と再生時間 ----
-    val pitch = h * 0.2f / DOT_ROWS
+    // スマホ表示（縦長・幅が狭い）では、ドット文字を2/3の大きさにする
+    val phoneMode = w / density < 600f
+    val pitch = h * 0.2f / DOT_ROWS * (if (phoneMode) 2f / 3f else 1f)
     val dotY = h * 0.02f
     if (caption != m.dotText) {
         m.dotText = caption

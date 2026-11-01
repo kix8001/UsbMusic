@@ -51,11 +51,11 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     RETRO("retro", "レトロLED", "昔のLEDグラフィックイコライザー風"),
     VU("vu", "アナログVU", "琥珀色に光るアナログ針メーター（L・R）"),
     VFD("vfd", "VFDスペクトラム", "昔のカーコンポの蛍光表示管風、奥行きのある立体イコライザー"),
-    VFD3D("vfd3d", "VFDスペクトラム 3D", "台形の傾斜をきつくして、奥へ進んでいくようなVFD"),
+    VFD3D("vfd3d", "VFDスペクトラム 3D", "低く横に広い台形で、奥へ伸びていくようなVFD"),
     RETRO_LR_CENTER("retro_lr_center", "レトロLR センター", "中央から左（L）と右（R）へLEDが伸びます"),
     WAVE("wave", "レインボーウェーブ", "音の波が奥から手前へ流れる立体スペクトラム"),
     CIRCLE("circle", "サークル", "円形に広がるスペクトラムと波形"),
-    WARP("warp", "ワープ", "激しくうねり回転しながら突き進む、光のトンネル"),
+    WARP("warp", "ワープ", "なめらかにうねりながら突き進む、光のトンネル"),
     LIGHTS("lights", "イルミネーション", "色が流れる電球が音に合わせて点灯します"),
     RIPPLE("ripple", "波紋", "しずくが落ちて波紋が広がり、重なって消えていきます"),
     RIPPLE_TOP("ripple_top", "カラー波紋", "真上から見た水面に、色とりどりの波紋が広がります"),
@@ -439,24 +439,25 @@ private fun DrawScope.drawWarp(m: Meter, t: Float) {
     drawRect(Color.Black)
     // 速度：音が大きいほど・低音が鳴るほど加速
     // 速く・激しく：ビートで急加速し、トンネル全体が大きく回転・蛇行する
-    val target = 2.5f + m.energy * 14f + m.bass * 12f
-    m.warpSpeed += (target - m.warpSpeed) * min(1f, m.dt * (if (target > m.warpSpeed) 10f else 1.5f))
-    m.tunnelZ += m.dt * m.warpSpeed * 0.9f
-    m.warpSpin += m.dt * (0.8f + m.energy * 3f)
+    // なめらかに：速さの変化はゆっくり追従させる
+    val target = 1.4f + m.energy * 6f + m.bass * 4f
+    m.warpSpeed += (target - m.warpSpeed) * min(1f, m.dt * (if (target > m.warpSpeed) 2.5f else 0.8f))
+    m.tunnelZ += m.dt * m.warpSpeed * 0.7f
+    m.warpSpin += m.dt * (0.25f + m.energy * 0.6f)
     val travel = m.tunnelZ
     val sx = (size.width / size.height * 0.65f).coerceAtLeast(1f)
     // トンネルの中心線がうねる（奥ほど大きくずれる）
     fun bend(z: Float): Offset {
         val w = travel + z
-        return Offset(size.width * 0.5f * sin(w * 1.3f + t * 0.9f), size.height * 0.55f * cos(w * 1.1f + t * 0.7f))
+        return Offset(size.width * 0.36f * sin(w * 0.9f + t * 0.35f), size.height * 0.4f * cos(w * 0.75f + t * 0.28f))
     }
     val near0 = bend(0.3f)
     // 画面全体のロール（左右に大きく傾く）と、低音での揺れ
-    val roll = sin(t * 0.8f) * 0.9f + m.warpSpin * 0.25f
+    val roll = sin(t * 0.25f) * 0.35f
     val cr = cos(roll)
     val srl = sin(roll)
-    val shakeX = (m.rnd.nextFloat() - 0.5f) * size.height * 0.08f * m.bass
-    val shakeY = (m.rnd.nextFloat() - 0.5f) * size.height * 0.08f * m.bass
+    val shakeX = 0f
+    val shakeY = 0f
     fun proj(z: Float, ox: Float, oy: Float): Offset {
         val b = bend(z)
         val x = ((b.x - near0.x) + ox * sx) / z * 0.9f
@@ -470,7 +471,7 @@ private fun DrawScope.drawWarp(m: Meter, t: Float) {
     for (k in count - 1 downTo 0) {
         val z = 0.32f + (k + 1 - phase) * spacing
         val near = (1f - z / 4.3f).coerceIn(0f, 1f)
-        val hue = ((t * 90f + (travel + z) * 120f) % 360f + 360f) % 360f
+        val hue = ((t * 35f + (travel + z) * 80f) % 360f + 360f) % 360f
         val c = Color.hsv(hue, 0.75f, 1f)
         val r = size.height * 0.42f
         val center = proj(z, 0f, 0f)
@@ -497,7 +498,7 @@ private fun DrawScope.drawWarp(m: Meter, t: Float) {
         m.streaks += Meter.Streak(m.rnd.nextFloat() * 6.283f, 0.3f + m.rnd.nextFloat() * 4f, 0.1f + m.rnd.nextFloat() * 0.3f, m.rnd.nextFloat())
     }
     for (s in m.streaks) {
-        s.z -= m.dt * m.warpSpeed * 0.9f
+        s.z -= m.dt * m.warpSpeed * 0.7f
         if (s.z <= 0.32f) {
             s.z = 4.3f
             s.angle = m.rnd.nextFloat() * 6.283f
@@ -514,7 +515,7 @@ private fun DrawScope.drawWarp(m: Meter, t: Float) {
     val far = proj(0.32f + count * spacing, 0f, 0f)
     val glow = size.height * (0.15f + 0.35f * m.energy)
     drawCircle(Brush.radialGradient(listOf(Color(0xCCFFFFFF), Color.Transparent), center = far, radius = glow), glow, far)
-    if (m.bass > 0.5f) drawRect(Color.White.copy(alpha = ((m.bass - 0.5f) * 0.5f).coerceAtMost(0.2f)))
+    if (m.bass > 0.65f) drawRect(Color.White.copy(alpha = ((m.bass - 0.65f) * 0.25f).coerceAtMost(0.08f)))
 }
 
 // ---------------- イルミネーション ----------------
@@ -1027,54 +1028,52 @@ private fun DrawScope.drawVfd(m: Meter) {
     }
 }
 
-// ---------------- VFDスペクトラム 3D（1層・台形の傾斜をきつく、奥へ進んでいく） ----------------
+// ---------------- VFDスペクトラム 3D（1層・低く横に広い台形。上の幅は下の約2割） ----------------
 
 private fun DrawScope.drawVfd3d(m: Meter) {
     drawRect(Color(0xFF050608))
     val n = 14
     val segs = VfdRows.size
-    val k = 0.22f
-    val floorY = size.height * 0.98f
-    val top = size.height * 0.05f
-    val zt = 1f + segs * k
-    val vpY = (top * zt - floorY) / (zt - 1f) // 一番上の段が top に来る消失点
-    val vpX = size.width / 2
+    val ratio = 0.9f       // 上の段ほど少しずつ低くして奥行きを出す
+    val topScale = 0.2f    // 一番上の幅は一番下の2割
+    val floorY = size.height * 0.97f
+    val top = size.height * 0.06f
+    val total = floorY - top
+    val h0 = total * (1 - ratio) / (1 - ratio.pow(segs))
+    val ys = FloatArray(segs + 1)
+    ys[0] = floorY
+    for (s in 0 until segs) ys[s + 1] = ys[s] - h0 * ratio.pow(s)
+    val cx = size.width / 2
     val baseW = size.width * 0.96f
-    fun p(x: Float, depth: Float): Offset {
-        val z = 1f + depth * k
-        return Offset(vpX + (x - vpX) / z, vpY + (floorY - vpY) / z)
+    fun x(u: Float, y: Float): Float {
+        val f = (floorY - y) / total
+        return cx + u * baseW * (1 - (1 - topScale) * f)
     }
-    // 床の線が手前へ流れてくる（音が大きいほど速く進む）
-    m.tunnelZ = (m.tunnelZ + m.dt * (1.2f + m.energy * 5f)) % 1f
-    val grid = Color(0xFF4FB3FF)
-    for (j in 0..segs + 1) {
-        val dep = j - m.tunnelZ
-        if (dep < 0f || dep > segs) continue
-        drawLine(
-            grid.copy(alpha = 0.3f / (1f + dep * 0.3f)),
-            p(vpX - baseW / 2 - size.width * 0.1f, dep), p(vpX + baseW / 2 + size.width * 0.1f, dep),
-            strokeWidth = 1.2f,
-        )
-    }
-    drawLine(grid.copy(alpha = 0.25f), p(vpX - baseW / 2, 0f), p(vpX - baseW / 2, segs.toFloat()), strokeWidth = 1.2f)
-    drawLine(grid.copy(alpha = 0.25f), p(vpX + baseW / 2, 0f), p(vpX + baseW / 2, segs.toFloat()), strokeWidth = 1.2f)
+    val rail = Color(0xFF4FB3FF).copy(alpha = 0.25f)
+    drawLine(rail, Offset(x(-0.5f, floorY), floorY), Offset(x(-0.5f, top), top), strokeWidth = 1.2f)
+    drawLine(rail, Offset(x(0.5f, floorY), floorY), Offset(x(0.5f, top), top), strokeWidth = 1.2f)
     val lv = m.bands(m.level, n)
-    val gap = 0.2f
     val path = Path()
-    for (s in segs - 1 downTo 0) {
+    for (s in 0 until segs) {
+        val y0 = ys[s]
+        val y1 = ys[s + 1] + (ys[s] - ys[s + 1]) * 0.22f
         val c = VfdRows[s]
         for (i in 0 until n) {
             val lit = (lv[i] * segs + 0.5f).toInt().coerceIn(1, segs)
-            val x0 = vpX - baseW / 2 + baseW * i / n + baseW / n * 0.13f
-            val x1 = x0 + baseW / n * 0.74f
+            val u0 = -0.5f + (i + 0.13f) / n
+            val u1 = -0.5f + (i + 0.87f) / n
             path.reset()
-            val a = p(x0, s.toFloat())
-            path.moveTo(a.x, a.y)
-            p(x1, s.toFloat()).let { path.lineTo(it.x, it.y) }
-            p(x1, s + 1 - gap).let { path.lineTo(it.x, it.y) }
-            p(x0, s + 1 - gap).let { path.lineTo(it.x, it.y) }
+            path.moveTo(x(u0, y0), y0)
+            path.lineTo(x(u1, y0), y0)
+            path.lineTo(x(u1, y1), y1)
+            path.lineTo(x(u0, y1), y1)
             path.close()
-            drawPath(path, c.copy(alpha = if (s < lit) 1f else 0.06f))
+            if (s < lit) {
+                drawPath(path, c.copy(alpha = 0.25f), style = Stroke(width = 4f))
+                drawPath(path, c)
+            } else {
+                drawPath(path, c.copy(alpha = 0.06f))
+            }
         }
     }
 }

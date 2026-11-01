@@ -24,6 +24,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import app.usbmusic.player.data.VideoPositions
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -61,6 +62,9 @@ class PlaybackService : MediaSessionService() {
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                 .build()
         }
+            // AC3・DTS など、ナビが再生できない音声は FFmpeg で再生する
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
         player = ExoPlayer.Builder(this, renderers)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -89,11 +93,17 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                flushVideo()
+                trackVideo()
                 savePosition()
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) errorStreak = 0 else savePosition()
+                if (isPlaying) errorStreak = 0 else {
+                    trackVideo()
+                    flushVideo()
+                    savePosition()
+                }
             }
 
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -116,6 +126,7 @@ class PlaybackService : MediaSessionService() {
 
         restoreState()
         handler.postDelayed(periodicSave, 10_000)
+        handler.postDelayed(videoTick, 1_000)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -126,8 +137,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        trackVideo()
+        flushVideo()
         savePosition()
         handler.removeCallbacks(periodicSave)
+        handler.removeCallbacks(videoTick)
         session?.run {
             player.release()
             release()
@@ -143,9 +157,40 @@ class PlaybackService : MediaSessionService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> {
-            val resolved = mediaItems.map { it.buildUpon().setUri(Uri.parse(it.mediaId)).build() }
+            val resolved = mediaItems.map { MediaItems.withLocal(it) }
             return Futures.immediateFuture(resolved.toMutableList())
         }
+    }
+
+    // ---------- 動画の「どこまで見たか」 ----------
+
+    private var videoId: String? = null
+    private var videoPos = 0L
+    private var videoDur = 0L
+
+    private val videoTick = object : Runnable {
+        override fun run() {
+            if (player.isPlaying) trackVideo()
+            handler.postDelayed(this, 1_000)
+        }
+    }
+
+    /** いま再生中の動画の位置を手元に控える */
+    private fun trackVideo() {
+        val item = player.currentMediaItem
+        if (MediaItems.isVideo(item)) {
+            videoId = item!!.mediaId
+            videoPos = player.currentPosition
+            videoDur = player.duration.takeIf { it > 0 } ?: 0L
+        } else {
+            videoId = null
+        }
+    }
+
+    /** 控えた位置を保存（次に見る時はここから） */
+    private fun flushVideo() {
+        val id = videoId ?: return
+        VideoPositions.put(this, id, videoPos, videoDur)
     }
 
     // ---------- 続きから再生のための保存・復元 ----------
@@ -164,6 +209,8 @@ class PlaybackService : MediaSessionService() {
                     .put("a", m.artist?.toString() ?: "")
                     .put("al", m.albumTitle?.toString() ?: "")
                     .put("aa", m.albumArtist?.toString() ?: "")
+                    .put("v", MediaItems.isVideo(item))
+                    .put("s", JSONArray(MediaItems.subtitlesOf(item)))
             )
         }
         store.edit().putString("queue", arr.toString()).apply()
@@ -186,7 +233,11 @@ class PlaybackService : MediaSessionService() {
             val arr = JSONArray(json)
             List(arr.length()) { i ->
                 val o = arr.getJSONObject(i)
-                MediaItems.build(o.getString("id"), o.optString("t"), o.optString("a"), o.optString("al"), o.optString("aa"))
+                val subs = o.optJSONArray("s")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty()
+                MediaItems.build(
+                    o.getString("id"), o.optString("t"), o.optString("a"), o.optString("al"), o.optString("aa"),
+                    video = o.optBoolean("v", false), subs = subs,
+                )
             }
         }.getOrNull()
         if (items.isNullOrEmpty()) return

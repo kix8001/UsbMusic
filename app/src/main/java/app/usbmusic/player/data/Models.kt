@@ -80,6 +80,19 @@ data class Track(
     }
 }
 
+/** 動画1本分の情報（ファイル名で並べる） */
+data class Video(
+    val uri: String,
+    val title: String,
+    val folder: String,
+    val durationMs: Long,
+    val lastModified: Long,
+    /** 同じ名前の字幕ファイル（.srt / .ass など。フォルダ指定モードのみ） */
+    val subtitles: List<String> = emptyList(),
+) {
+    val folderName: String get() = folder.trimEnd('/').substringAfterLast('/')
+}
+
 class Album(
     val key: String,
     val title: String,

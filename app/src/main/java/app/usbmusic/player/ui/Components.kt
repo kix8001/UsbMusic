@@ -273,9 +273,16 @@ fun AlbumTile(album: Album, subtitle: String, onClick: () -> Unit) {
  * 押した文字（その文字のアーティストが無ければ次の文字）の位置へ移動する。
  */
 @Composable
-fun JumpGrid(letters: List<String>, present: Set<String>, onSelect: (String) -> Unit, onClose: () -> Unit) {
+fun JumpGrid(
+    letters: List<String>,
+    present: Set<String>,
+    onSelect: (String) -> Unit,
+    onClose: () -> Unit,
+    extra: Pair<String, () -> Unit>? = null,
+) {
     val cols = 7
-    val cells: List<String?> = letters + listOf(null) // 最後の空きマスの右下に「完了」
+    // 文字の後ろに追加ボタン（「動画」）、最後のマスの右下に「完了」
+    val cells: List<String?> = letters + listOfNotNull(extra?.first) + listOf(null)
     val rows = cells.chunked(cols)
     Column(
         Modifier.fillMaxSize().background(Pal.Bg).padding(horizontal = 28.dp, vertical = 12.dp)
@@ -291,6 +298,7 @@ fun JumpGrid(letters: List<String>, present: Set<String>, onSelect: (String) -> 
                             .clip(RoundedCornerShape(10.dp))
                             .then(
                                 when {
+                                    letter != null && extra != null && letter == extra.first -> Modifier.clickable { extra.second() }
                                     letter != null -> Modifier.clickable { onSelect(letter) }
                                     isLast -> Modifier.clickable(onClick = onClose)
                                     else -> Modifier
@@ -299,7 +307,9 @@ fun JumpGrid(letters: List<String>, present: Set<String>, onSelect: (String) -> 
                             .padding(start = 12.dp),
                         contentAlignment = Alignment.CenterStart,
                     ) {
-                        if (letter != null) {
+                        if (letter != null && extra != null && letter == extra.first) {
+                            Text(letter, color = Pal.Accent, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                        } else if (letter != null) {
                             Text(
                                 letter,
                                 color = if (letter in present) Pal.Text else Pal.Sub.copy(alpha = 0.5f),
@@ -358,6 +368,7 @@ fun <T> IndexedList(
     state: LazyListState,
     jumpRequested: Boolean = false,
     onJumpHandled: () -> Unit = {},
+    extraJump: Pair<String, () -> Unit>? = null,
     header: @Composable () -> Unit,
     row: @Composable (Int, T) -> Unit,
 ) {
@@ -407,6 +418,7 @@ fun <T> IndexedList(
             JumpGrid(
                 letters = letters,
                 present = groups.keys,
+                extra = extraJump?.let { (label, action) -> label to { showJump = false; action() } },
                 onSelect = { g ->
                     showJump = false
                     // その文字が無ければ、次にある文字へ（無ければ最後の文字へ）

@@ -48,6 +48,8 @@ fun NowPlayingScreen(
     onVisTap: () -> Unit,
     onArtist: (String) -> Unit,
     onAlbum: (String) -> Unit,
+    fullscreen: Boolean = false,
+    onFullscreen: () -> Unit = {},
 ) {
     val item = conn.current
     if (item == null) {
@@ -56,6 +58,16 @@ fun NowPlayingScreen(
     }
     val track = remember(item.mediaId, lib) { lib.byUri(item.mediaId) ?: Track.fromItem(item) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
+    val video = conn.isVideo
+    // 動画の時はアートの場所に動画を映す（タップでフル画面）
+    val videoBox: @Composable (Modifier) -> Unit = { m ->
+        Box(
+            m.clip(RoundedCornerShape(12.dp)).background(Color.Black).clickable(onClick = onFullscreen),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!fullscreen) VideoSurface(conn, Modifier.fillMaxSize())
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val narrow = maxWidth < 600.dp || maxHeight > maxWidth
@@ -67,12 +79,13 @@ fun NowPlayingScreen(
                     QueuePanel(conn, lib) { showQueue = false }
                 } else {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        AlbumArt(track, art, corner = 12.dp)
+                        if (video) videoBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+                        else AlbumArt(track, art, corner = 12.dp)
                     }
                     Spacer(Modifier.height(16.dp))
                     PlayerPanel(
                         conn, track, lib, visStyle, onVisTap, onArtist, onAlbum,
-                        compact = true,
+                        compact = true, video = video, onFullscreen = onFullscreen,
                         modifier = Modifier.weight(1f),
                     ) { showQueue = true }
                 }
@@ -82,8 +95,9 @@ fun NowPlayingScreen(
                 Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                BoxWithConstraints(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                    AlbumArt(track, min(maxWidth, maxHeight), corner = 12.dp)
+                BoxWithConstraints(Modifier.weight(if (video) 1.4f else 1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    if (video) videoBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+                    else AlbumArt(track, min(maxWidth, maxHeight), corner = 12.dp)
                 }
                 Spacer(Modifier.width(36.dp))
                 Box(Modifier.weight(1.15f).fillMaxHeight()) {
@@ -92,7 +106,7 @@ fun NowPlayingScreen(
                     } else {
                         PlayerPanel(
                             conn, track, lib, visStyle, onVisTap, onArtist, onAlbum,
-                            compact = false,
+                            compact = false, video = video, onFullscreen = onFullscreen,
                             modifier = Modifier.fillMaxSize(),
                         ) { showQueue = true }
                     }
@@ -113,6 +127,8 @@ private fun PlayerPanel(
     onAlbum: (String) -> Unit,
     compact: Boolean,
     modifier: Modifier,
+    video: Boolean = false,
+    onFullscreen: () -> Unit = {},
     onQueue: () -> Unit,
 ) {
     var position by remember { mutableLongStateOf(conn.position) }
@@ -193,6 +209,10 @@ private fun PlayerPanel(
             ToggleIcon(Icons.Filled.QueueMusic, false, tog) { onQueue() }
         }
 
+        if (video) {
+            Spacer(Modifier.height(10.dp))
+            VideoButtons(conn, onFullscreen)
+        }
         if (showVis) {
             Spacer(Modifier.height(12.dp))
             Visualizer(

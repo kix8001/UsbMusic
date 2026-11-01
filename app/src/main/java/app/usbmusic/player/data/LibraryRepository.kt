@@ -21,7 +21,9 @@ import java.io.File
 
 private const val TAG = "LibraryRepository"
 
-private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "ogg", "oga", "opus", "wav", "mp4", "3gp", "amr", "mka")
+private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "ogg", "oga", "opus", "wav", "amr", "mka")
+private val VIDEO_EXT = setOf("mp4", "m4v", "mkv", "webm", "mov", "avi", "ts", "m2ts", "mts", "3gp", "flv", "wmv", "mpg", "mpeg")
+private val SUB_EXT = setOf("srt", "ass", "ssa", "vtt")
 private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "webp")
 private val COVER_NAMES = setOf("cover", "folder", "front", "album", "albumart", "albumartsmall", "jacket")
 private val NUMBER = Regex("""\d+""")
@@ -131,6 +133,52 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
         } else t
     }
 
+    // ---------- 動画 ----------
+
+    private val folderVideoFiles = ArrayList<FileEntry>()
+    private val folderSubs = HashMap<String, String>()
+
+    /** 動画の一覧（音楽の読み込みの後に呼ぶ） */
+    suspend fun scanVideos(): List<Video> = withContext(Dispatchers.IO) {
+        if (prefs.sourceMode == Prefs.MODE_FOLDER) {
+            folderVideoFiles.toList().map { f ->
+                val stem = f.name.substringBeforeLast('.').lowercase()
+                // movie.srt / movie.ja.srt などを字幕として紐付ける
+                val subs = folderSubs.filterKeys { key ->
+                    key.startsWith(f.folder + stem + ".")
+                }.toSortedMap().values.toList()
+                Video(f.uri, f.name.substringBeforeLast('.'), f.folder, 0L, f.lastModified, subs)
+            }
+        } else {
+            val out = ArrayList<Video>()
+            for (vol in MediaStore.getExternalVolumeNames(context)) {
+                val isPrimary = vol == MediaStore.VOLUME_EXTERNAL_PRIMARY
+                if (isPrimary && !prefs.includeInternal) continue
+                val base = MediaStore.Video.Media.getContentUri(vol)
+                try {
+                    context.contentResolver.query(
+                        base, arrayOf("_id", "_display_name", "duration", "relative_path", "date_modified"),
+                        null, null, null,
+                    )?.use { c ->
+                        while (c.moveToNext()) {
+                            val name = c.str(1)
+                            out += Video(
+                                uri = ContentUris.withAppendedId(base, c.getLong(0)).toString(),
+                                title = name.substringBeforeLast('.'),
+                                folder = "$vol/${c.str(3)}",
+                                durationMs = c.long(2),
+                                lastModified = c.long(4),
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "video query failed for $vol", e)
+                }
+            }
+            out
+        }
+    }
+
     // ---------- 読み込み ----------
 
     /** 直近の読み込みの診断情報（曲が見つからない時に画面へ表示する） */
@@ -159,6 +207,8 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                     val files = ArrayList<FileEntry>()
                     val covers = HashMap<String, String>()
                     val anyImage = HashMap<String, String>()
+                    folderVideoFiles.clear()
+                    folderSubs.clear()
                     val stats = WalkStats()
                     walk(tree, DocumentsContract.getTreeDocumentId(tree), "", files, covers, anyImage, 0, stats)
                     log += "フォルダ ${stats.dirs}個 / ファイル ${stats.entries}個を確認、音楽 ${files.size}曲"
@@ -443,7 +493,11 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                         } else {
                             val ext = name.substringAfterLast('.', "").lowercase()
                             val docUri = DocumentsContract.buildDocumentUriUsingTree(tree, id).toString()
-                            if (ext in AUDIO_EXT || mime.startsWith("audio/")) {
+                            if (ext in VIDEO_EXT || (ext !in AUDIO_EXT && mime.startsWith("video/"))) {
+                                folderVideoFiles += FileEntry(docUri, name, path, modified)
+                            } else if (ext in SUB_EXT) {
+                                folderSubs[path + name.lowercase()] = docUri
+                            } else if (ext in AUDIO_EXT || mime.startsWith("audio/")) {
                                 files += FileEntry(docUri, name, path, modified)
                             } else if (ext in IMAGE_EXT) {
                                 val stem = name.substringBeforeLast('.').lowercase()

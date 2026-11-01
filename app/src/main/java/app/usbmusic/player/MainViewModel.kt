@@ -18,6 +18,9 @@ import app.usbmusic.player.data.ArtLoader
 import app.usbmusic.player.data.Library
 import app.usbmusic.player.data.LibraryRepository
 import app.usbmusic.player.data.Prefs
+import app.usbmusic.player.data.SortKey
+import app.usbmusic.player.data.Video
+import app.usbmusic.player.data.VideoPositions
 import app.usbmusic.player.ui.VisStyle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +49,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var tagProgress by mutableStateOf<Pair<Int, Int>?>(null)
         private set
+    var videos by mutableStateOf<List<Video>>(emptyList())
+        private set
+    var videoPositions by mutableStateOf<Map<String, Pair<Long, Long>>>(emptyMap())
+        private set
+
+    /** 動画のフル画面表示 */
+    var fullscreen by mutableStateOf(false)
+
+    fun refreshVideoPositions() {
+        videoPositions = VideoPositions.all(getApplication())
+    }
 
     var visualizer by mutableStateOf(VisStyle.of(prefs.visualizer))
         private set
@@ -121,6 +135,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val tracks = repo.scan { n -> viewModelScope.launch { scanProgress = n } }
                 library = withContext(Dispatchers.Default) { Library(tracks) }
                 ArtLoader.resetMissing()
+                videos = withContext(Dispatchers.Default) { SortKey.sorted(repo.scanVideos()) { it.title } }
+                refreshVideoPositions()
                 // USBがライブラリに未登録なら、一度だけ自動でAndroidに登録を依頼する
                 if (tracks.isEmpty() && repo.unindexedUsbDirs.isNotEmpty() && !mediaScanRequested) {
                     requestMediaScan()

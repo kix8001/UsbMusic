@@ -77,7 +77,10 @@ class MainActivity : ComponentActivity() {
 
     private fun askPermissions() {
         val list = mutableListOf(audioPermission())
-        if (Build.VERSION.SDK_INT >= 33) list += Manifest.permission.POST_NOTIFICATIONS
+        if (Build.VERSION.SDK_INT >= 33) {
+            list += Manifest.permission.READ_MEDIA_VIDEO
+            list += Manifest.permission.POST_NOTIFICATIONS
+        }
         permissionLauncher.launch(list.toTypedArray())
     }
 

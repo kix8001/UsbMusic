@@ -12,8 +12,8 @@ android {
         applicationId = "app.usbmusic.player"
         minSdk = 29
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.3.4"
+        versionCode = 11
+        versionName = "0.4.0"
     }
 
     signingConfigs {
@@ -70,6 +70,9 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
+    // AC3 / DTS など Android が標準で再生できない音声を再生するための FFmpeg（Jellyfin がビルドしたもの）
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.4.1+1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

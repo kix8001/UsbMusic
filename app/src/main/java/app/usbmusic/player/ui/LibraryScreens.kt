@@ -98,6 +98,7 @@ fun ArtistsScreen(
     lib: Library,
     jumpRequested: Boolean = false,
     onJumpHandled: () -> Unit = {},
+    onVideos: (() -> Unit)? = null,
     onArtist: (String) -> Unit,
 ) {
     val state = rememberLazyListState()
@@ -107,6 +108,7 @@ fun ArtistsScreen(
         state = state,
         jumpRequested = jumpRequested,
         onJumpHandled = onJumpHandled,
+        extraJump = onVideos?.let { "動画" to it },
         header = { ScreenTitle("アーティスト") },
     ) { _, artist ->
         ListRow(

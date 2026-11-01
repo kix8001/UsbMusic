@@ -10,10 +10,17 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Format
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import app.usbmusic.player.data.Track
+import app.usbmusic.player.data.Video
+import app.usbmusic.player.data.VideoPositions
+import java.util.Locale
 import com.google.common.util.concurrent.ListenableFuture
 import kotlin.random.Random
 
@@ -34,6 +41,12 @@ class PlayerConnection(private val context: Context) {
         private set
     var queueVersion by mutableIntStateOf(0)
         private set
+    var tracks by mutableStateOf(Tracks.EMPTY)
+        private set
+
+    /** いま再生中なのが動画か */
+    val isVideo: Boolean
+        get() = MediaItems.isVideo(current) || tracks.containsType(C.TRACK_TYPE_VIDEO)
 
     private var future: ListenableFuture<MediaController>? = null
 
@@ -74,6 +87,7 @@ class PlayerConnection(private val context: Context) {
         shuffle = p.shuffleModeEnabled
         repeat = p.repeatMode
         duration = p.duration.let { if (it == C.TIME_UNSET || it < 0) 0L else it }
+        tracks = p.currentTracks
     }
 
     val position: Long get() = controller?.currentPosition ?: 0L
@@ -87,6 +101,95 @@ class PlayerConnection(private val context: Context) {
         c.setMediaItems(items, startIndex, 0L)
         c.prepare()
         c.play()
+    }
+
+    /** 動画を再生（前回の続きから）。リストの次の動画へも続けて進める */
+    fun playVideos(context: Context, videos: List<Video>, start: Int) {
+        val c = controller ?: return
+        if (videos.isEmpty()) return
+        val index = start.coerceIn(0, videos.size - 1)
+        val resume = VideoPositions.get(context, videos[index].uri)?.first ?: 0L
+        c.trackSelectionParameters = c.trackSelectionParameters.buildUpon()
+            .clearOverrides()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .build()
+        c.shuffleModeEnabled = false
+        c.setMediaItems(videos.map(MediaItems::from), index, resume)
+        c.prepare()
+        c.play()
+    }
+
+    /** 音声・字幕の選択肢 */
+    class TrackOption(val label: String, val selected: Boolean, val group: TrackGroup?, val index: Int)
+
+    fun options(type: Int): List<TrackOption> {
+        val out = ArrayList<TrackOption>()
+        for (g in tracks.groups) {
+            if (g.type != type) continue
+            for (i in 0 until g.length) {
+                if (!g.isTrackSupported(i)) continue
+                out += TrackOption(describe(g.getTrackFormat(i), type, out.size + 1), g.isTrackSelected(i), g.mediaTrackGroup, i)
+            }
+        }
+        return out
+    }
+
+    val subtitlesOn: Boolean
+        get() = tracks.groups.any { it.type == C.TRACK_TYPE_TEXT && it.isSelected }
+
+    fun select(type: Int, option: TrackOption) {
+        val c = controller ?: return
+        val group = option.group ?: return
+        c.trackSelectionParameters = c.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(type, false)
+            .setOverrideForType(TrackSelectionOverride(group, option.index))
+            .build()
+    }
+
+    fun subtitlesOff() {
+        val c = controller ?: return
+        c.trackSelectionParameters = c.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+    }
+
+    private fun describe(f: Format, type: Int, n: Int): String {
+        val parts = ArrayList<String>()
+        val lang = f.language?.takeIf { it.isNotBlank() && it != "und" }?.let {
+            runCatching { Locale.forLanguageTag(it).getDisplayLanguage(Locale.JAPANESE) }.getOrNull()?.takeIf { d -> d.isNotBlank() } ?: it
+        }
+        f.label?.takeIf { it.isNotBlank() }?.let { parts += it }
+        if (lang != null && parts.none { it.contains(lang) }) parts += lang
+        val mime = f.sampleMimeType.orEmpty()
+        val codec = when {
+            mime.contains("eac3") -> "Dolby Digital Plus"
+            mime.contains("ac3") -> "AC3"
+            mime.contains("dts") -> "DTS"
+            mime.contains("truehd") -> "TrueHD"
+            mime.contains("mp4a") -> "AAC"
+            mime.contains("mpeg") && type == C.TRACK_TYPE_AUDIO -> "MP3"
+            mime.contains("opus") -> "Opus"
+            mime.contains("vorbis") -> "Vorbis"
+            mime.contains("flac") -> "FLAC"
+            mime.contains("subrip") -> "SRT"
+            mime.contains("ssa") -> "ASS"
+            mime.contains("pgs") -> "PGS"
+            mime.contains("vobsub") -> "VobSub"
+            mime.contains("vtt") -> "WebVTT"
+            else -> null
+        }
+        codec?.let { parts += it }
+        if (type == C.TRACK_TYPE_AUDIO && f.channelCount > 0) {
+            parts += when (f.channelCount) {
+                1 -> "モノラル"
+                2 -> "ステレオ"
+                6 -> "5.1ch"
+                8 -> "7.1ch"
+                else -> "${f.channelCount}ch"
+            }
+        }
+        return if (parts.isEmpty()) "トラック $n" else parts.joinToString(" · ")
     }
 
     fun toggle() {

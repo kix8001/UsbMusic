@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -47,6 +48,7 @@ sealed interface Screen {
     data object Songs : Screen { override val key = "songs" }
     data object Search : Screen { override val key = "search" }
     data object Settings : Screen { override val key = "settings" }
+    data object Videos : Screen { override val key = "videos" }
     data class ArtistDetail(val name: String) : Screen { override val key: String get() = "artist:$name" }
     data class AlbumDetail(val albumKey: String) : Screen { override val key: String get() = "album:$albumKey" }
 }
@@ -57,6 +59,7 @@ enum class NavTab(val label: String, val icon: ImageVector, val root: Screen) {
     ALBUMS("アルバム", Icons.Filled.Album, Screen.Albums),
     A2Z("A2Z", Icons.Filled.SortByAlpha, Screen.Artists), // アーティストの頭文字一覧をすぐ開く
     SONGS("曲", Icons.Filled.MusicNote, Screen.Songs),
+    VIDEOS("動画", Icons.Filled.Movie, Screen.Videos),
     SEARCH("検索", Icons.Filled.Search, Screen.Search),
     SETTINGS("設定", Icons.Filled.Settings, Screen.Settings),
 }
@@ -141,8 +144,13 @@ private fun MainLayout(vm: MainViewModel, conn: PlayerConnection, onPickFolder: 
         }
     }
 
+    // 動画のフル画面は、動画以外になったら自動で閉じる
+    LaunchedEffect(conn.isVideo) { if (!conn.isVideo) vm.fullscreen = false }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (maxWidth < 600.dp) {
+        if (vm.fullscreen && conn.isVideo) {
+            FullscreenVideo(conn) { vm.fullscreen = false }
+        } else if (maxWidth < 600.dp) {
             // 縦長（分割表示）：メニューを下に置き、画面の横幅をすべて使う
             Column(Modifier.fillMaxSize()) {
                 content()
@@ -198,6 +206,8 @@ private fun ScreenContent(
             lib = lib,
             visStyle = vm.visualizer,
             onVisTap = { vm.nextVisualizer() },
+            fullscreen = vm.fullscreen,
+            onFullscreen = { vm.fullscreen = true },
             onArtist = { open(NavTab.ARTISTS, Screen.ArtistDetail(it)) },
             onAlbum = { open(NavTab.ALBUMS, Screen.AlbumDetail(it)) },
         )
@@ -205,7 +215,9 @@ private fun ScreenContent(
             lib = lib,
             jumpRequested = vm.jumpRequested,
             onJumpHandled = { vm.jumpHandled() },
+            onVideos = { open(NavTab.VIDEOS, null) },
         ) { push(Screen.ArtistDetail(it)) }
+        Screen.Videos -> VideosScreen(vm, conn) { open(NavTab.NOW, null) }
         Screen.Albums -> AlbumsScreen(lib) { push(Screen.AlbumDetail(it)) }
         Screen.Songs -> SongsScreen(lib, conn)
         Screen.Search -> SearchScreen(

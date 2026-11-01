@@ -203,6 +203,7 @@ fun Visualizer(
     timeText: () -> String = { "" },
 ) {
     if (style == VisStyle.OFF) return
+    DotFont.init(androidx.compose.ui.platform.LocalContext.current)
     val currentCaption by rememberUpdatedState(caption)
     val currentTime by rememberUpdatedState(timeText)
     val meter = remember { Meter() }
@@ -1048,7 +1049,17 @@ private fun DrawScope.drawVfd(m: Meter) {
 
 // ---------------- VFDスペクトラム 3D（1層・低く横に広い台形＋昔のカーステ風の表示） ----------------
 
-private const val DOT_ROWS = 14
+private const val DOT_ROWS = 14 // ドットフォント12px（上11・下3）がちょうど収まる高さ
+
+/** 昔の表示器のような点で描くために作られたドットフォント（PixelMplus12 / M+ FONT LICENSE） */
+private object DotFont {
+    @Volatile var typeface: Typeface? = null
+    fun init(context: android.content.Context) {
+        if (typeface == null) {
+            typeface = runCatching { Typeface.createFromAsset(context.assets, "fonts/PixelMplus12-Regular.ttf") }.getOrNull()
+        }
+    }
+}
 private val VfdCyan = Color(0xFF7FE0FF)
 private val VfdAmber = Color(0xFFFFD84A)
 
@@ -1057,8 +1068,9 @@ private fun textToDots(text: String): Pair<Int, BooleanArray> {
     if (text.isEmpty()) return 0 to BooleanArray(0)
     val paint = Paint().apply {
         isAntiAlias = false
-        textSize = 12.5f
-        typeface = Typeface.DEFAULT
+        isSubpixelText = false
+        textSize = 12f // フォントが設計された大きさちょうどで描くと、点がぴったり升目に乗る
+        typeface = DotFont.typeface ?: Typeface.DEFAULT
         color = android.graphics.Color.WHITE
     }
     val w = (paint.measureText(text) + 2).toInt().coerceIn(1, 4000)

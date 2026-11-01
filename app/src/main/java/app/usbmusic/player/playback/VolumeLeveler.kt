@@ -19,7 +19,8 @@ object PlaybackOptions {
 /**
  * 音量を一定にする（オートゲイン＋リミッター）。
  * 再生中の音の大きさを測り、小さい曲・動画は持ち上げ、大きいものは下げる。
- * 大きくなった時はすばやく（約0.3秒）、小さくなった時はゆっくり（約3秒）追従して、自然に聞こえるようにする。
+ * 大きくなった時はすばやく（約0.1〜0.3秒）、小さくなった時はゆっくり（約1〜3秒）追従して、自然に聞こえるようにする。
+ * 追従が間に合わない一瞬の大音量はリミッターで抑える。
  */
 @OptIn(UnstableApi::class)
 object VolumeLeveler : BaseAudioProcessor() {
@@ -34,9 +35,10 @@ object VolumeLeveler : BaseAudioProcessor() {
     private var blockFrames = 441
     private var env = TARGET_RMS * TARGET_RMS  // 音の大きさ（二乗平均）の推定値
     private var gain = 1f
-    private var attackCoef = 0.05f
-    private var releaseCoef = 0.003f
-    private var envCoef = 0.03f
+    private var attackCoef = 0.1f
+    private var releaseCoef = 0.007f
+    private var envUp = 0.2f
+    private var envDown = 0.02f
 
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) return AudioFormat.NOT_SET
@@ -44,9 +46,10 @@ object VolumeLeveler : BaseAudioProcessor() {
         val rate = inputAudioFormat.sampleRate.coerceAtLeast(8000)
         blockFrames = (rate / 100).coerceAtLeast(1) // 10ミリ秒ごとに調整
         val blocksPerSec = rate.toFloat() / blockFrames
-        envCoef = 1f / (0.4f * blocksPerSec)      // 音の大きさは約0.4秒の平均
-        attackCoef = 1f / (0.3f * blocksPerSec)
-        releaseCoef = 1f / (3.0f * blocksPerSec)
+        envUp = 1f / (0.05f * blocksPerSec)      // 大きくなった音はすぐ測る
+        envDown = 1f / (0.5f * blocksPerSec)     // 小さくなった音はゆっくり
+        attackCoef = 1f / (0.1f * blocksPerSec)  // 下げる時は約0.1秒
+        releaseCoef = 1f / (1.2f * blocksPerSec) // 上げる時は約1.2秒
         return inputAudioFormat
     }
 
@@ -75,7 +78,7 @@ object VolumeLeveler : BaseAudioProcessor() {
                 sum += v * v
             }
             val ms = (sum / (n * channels)).toFloat()
-            env += (ms - env) * envCoef
+            env += (ms - env) * (if (ms > env) envUp else envDown)
             val rms = sqrt(env)
             val target = if (rms < SILENCE) gain else (TARGET_RMS / rms).coerceIn(MIN_GAIN, MAX_GAIN)
             val from = gain

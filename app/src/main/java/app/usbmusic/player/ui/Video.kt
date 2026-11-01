@@ -1,6 +1,14 @@
 package app.usbmusic.player.ui
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Usb
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
@@ -181,11 +189,39 @@ fun VideosScreen(vm: MainViewModel, conn: PlayerConnection, onPlayed: () -> Unit
     val videos = vm.videos
     LaunchedEffect(Unit) { vm.refreshVideoPositions() }
     if (videos.isEmpty()) {
+        val granted = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
+        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            if (ok) vm.rescan()
+        }
         if (vm.scanning || !vm.loaded) {
             CenterMessage("読み込んでいます…")
         } else {
-            CenterMessage("動画が見つかりません", "MP4・MKVなどの動画を音楽と同じUSBメモリに入れてください。") {
+            CenterMessage(
+                "動画が見つかりません",
+                if (!granted) "動画へのアクセスを許可してください。"
+                else "MP4・MKVなどを音楽と同じUSBメモリに入れて、「USBを登録し直す」を押してください。",
+            ) {
                 Icon(Icons.Filled.Movie, contentDescription = null, tint = Pal.Sub, modifier = Modifier.size(56.dp))
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (!granted) {
+                        PillButton(Icons.Filled.Movie, "動画へのアクセスを許可") {
+                            launcher.launch(Manifest.permission.READ_MEDIA_VIDEO)
+                        }
+                    } else {
+                        PillButton(Icons.Filled.Refresh, "再読み込み") { vm.rescan() }
+                        PillButton(Icons.Filled.Usb, "USBを登録し直す") { vm.requestMediaScan() }
+                    }
+                }
+                if (vm.mediaScanRunning) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("Androidが登録しています…（数分かかることがあります）", color = Pal.Text, fontSize = 16.sp)
+                }
+                if (vm.videoReport.isNotBlank()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(vm.videoReport, color = Pal.Sub, fontSize = 13.sp)
+                }
             }
         }
         return

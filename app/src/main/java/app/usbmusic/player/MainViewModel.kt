@@ -51,6 +51,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var videos by mutableStateOf<List<Video>>(emptyList())
         private set
+    var videoReport by mutableStateOf("")
+        private set
     var videoPositions by mutableStateOf<Map<String, Pair<Long, Long>>>(emptyMap())
         private set
 
@@ -136,6 +138,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 library = withContext(Dispatchers.Default) { Library(tracks) }
                 ArtLoader.resetMissing()
                 videos = withContext(Dispatchers.Default) { SortKey.sorted(repo.scanVideos()) { it.title } }
+                videoReport = repo.videoReport
                 refreshVideoPositions()
                 // USBがライブラリに未登録なら、一度だけ自動でAndroidに登録を依頼する
                 if (tracks.isEmpty() && repo.unindexedUsbDirs.isNotEmpty() && !mediaScanRequested) {

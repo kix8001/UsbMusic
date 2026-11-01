@@ -25,7 +25,12 @@ class MainActivity : ComponentActivity() {
     private var permitted by mutableStateOf(false)
 
     private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refreshPermission() }
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val wasStarted = permitted
+            refreshPermission()
+            // 後から許可された時（動画など）は読み込み直す
+            if (wasStarted && result.values.any { it }) vm.rescan()
+        }
 
     private val folderLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -42,7 +47,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         conn = PlayerConnection(applicationContext)
         refreshPermission()
-        if (!permitted) askPermissions()
+        if (!permitted || !videoGranted()) askPermissions()
         setContent {
             App(
                 vm = vm,
@@ -74,6 +79,10 @@ class MainActivity : ComponentActivity() {
     private fun audioPermission(): String =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
+
+    private fun videoGranted(): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
 
     private fun askPermissions() {
         val list = mutableListOf(audioPermission())

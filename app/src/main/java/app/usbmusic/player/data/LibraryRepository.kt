@@ -135,12 +135,19 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
 
     // ---------- 動画 ----------
 
+    /** 動画が見つからない時に表示する説明 */
+    @Volatile
+    var videoReport: String = ""
+        private set
+
     private val folderVideoFiles = ArrayList<FileEntry>()
     private val folderSubs = HashMap<String, String>()
 
     /** 動画の一覧（音楽の読み込みの後に呼ぶ） */
     suspend fun scanVideos(): List<Video> = withContext(Dispatchers.IO) {
         if (prefs.sourceMode == Prefs.MODE_FOLDER) {
+            val tree = prefs.treeUri?.let { runCatching { DocumentsContract.getTreeDocumentId(Uri.parse(it)) }.getOrNull() }
+            videoReport = "フォルダ指定モード：「$tree」の中に動画 ${folderVideoFiles.size}本"
             folderVideoFiles.toList().map { f ->
                 val stem = f.name.substringBeforeLast('.').lowercase()
                 // movie.srt / movie.ja.srt などを字幕として紐付ける
@@ -151,9 +158,14 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
             }
         } else {
             val out = ArrayList<Video>()
+            val notes = ArrayList<String>()
+            val granted = Build.VERSION.SDK_INT < 33 ||
+                context.checkSelfPermission(android.Manifest.permission.READ_MEDIA_VIDEO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) notes += "動画へのアクセスが許可されていません"
             for (vol in MediaStore.getExternalVolumeNames(context)) {
                 val isPrimary = vol == MediaStore.VOLUME_EXTERNAL_PRIMARY
                 if (isPrimary && !prefs.includeInternal) continue
+                val before = out.size
                 val base = MediaStore.Video.Media.getContentUri(vol)
                 try {
                     context.contentResolver.query(
@@ -171,10 +183,13 @@ class LibraryRepository(private val context: Context, private val prefs: Prefs) 
                             )
                         }
                     }
+                    notes += "$vol：${out.size - before}本"
                 } catch (e: Exception) {
+                    notes += "$vol：読み込みエラー"
                     Log.w(TAG, "video query failed for $vol", e)
                 }
             }
+            videoReport = notes.joinToString(" ・ ")
             out
         }
     }

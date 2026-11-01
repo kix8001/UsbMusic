@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "app.usbmusic.player"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "app.usbmusic.player"
@@ -68,11 +68,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
 
-    implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-session:1.4.1")
-    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-exoplayer:1.5.0")
+    implementation("androidx.media3:media3-session:1.5.0")
+    implementation("androidx.media3:media3-ui:1.5.0")
     // AC3 / DTS など Android が標準で再生できない音声を再生するための FFmpeg（Jellyfin がビルドしたもの）
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.4.1+1")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

@@ -242,7 +242,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** AndroidのメディアスキャナーにUSBの中身を調べて登録するよう依頼する */
     fun requestMediaScan() {
-        val dirs = repo.removableDirs()
+        // USBに加えて、「本体の音楽も含める」がオンなら本体の Download・Music・Movies も登録し直す
+        val internal = if (prefs.includeInternal) {
+            val root = android.os.Environment.getExternalStorageDirectory().path
+            listOf("Download", "Music", "Movies").map { "$root/$it" }
+        } else emptyList()
+        val dirs = repo.removableDirs() + internal
         if (dirs.isEmpty() || mediaScanRunning) return
         mediaScanRequested = true
         mediaScanRunning = true
@@ -276,6 +281,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setIncludeInternal(on: Boolean) {
         prefs.includeInternal = on
         rescan()
+        if (on) requestMediaScan()
     }
 
     fun clearArtCache() {

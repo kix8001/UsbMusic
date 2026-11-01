@@ -97,11 +97,11 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
             else "検出されたUSB：" + usbLabels.joinToString("、")
         )
         ActionRow("ライブラリを再読み込み") { vm.rescan() }
-        ActionRow(if (vm.mediaScanRunning) "USBを登録中…" else "AndroidにUSBの曲を登録し直してもらう") { vm.requestMediaScan() }
+        ActionRow(if (vm.mediaScanRunning) "登録中…（数分かかることがあります）" else "Androidに曲・動画を登録し直してもらう") { vm.requestMediaScan() }
         ActionRow("アルバムアートを読み込み直す") { vm.clearArtCache() }
 
         SectionHeader("このアプリについて")
-        InfoRow("mTunes 0.6.1")
+        InfoRow("mTunes 0.6.2")
     }
 }
 

@@ -51,11 +51,11 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     RETRO("retro", "レトロLED", "昔のLEDグラフィックイコライザー風"),
     VU("vu", "アナログVU", "琥珀色に光るアナログ針メーター（L・R）"),
     VFD("vfd", "VFDスペクトラム", "昔のカーコンポの蛍光表示管風、奥行きのある立体イコライザー"),
-    VFD3D("vfd3d", "VFDスペクトラム 3D", "VFDが奥へ奥へと流れていく、傾斜のきつい立体表示"),
+    VFD3D("vfd3d", "VFDスペクトラム 3D", "台形の傾斜をきつくして、奥へ進んでいくようなVFD"),
     RETRO_LR_CENTER("retro_lr_center", "レトロLR センター", "中央から左（L）と右（R）へLEDが伸びます"),
     WAVE("wave", "レインボーウェーブ", "音の波が奥から手前へ流れる立体スペクトラム"),
     CIRCLE("circle", "サークル", "円形に広がるスペクトラムと波形"),
-    WARP("warp", "ワープ", "うねりながら突き進む、光のトンネル"),
+    WARP("warp", "ワープ", "激しくうねり回転しながら突き進む、光のトンネル"),
     LIGHTS("lights", "イルミネーション", "色が流れる電球が音に合わせて点灯します"),
     RIPPLE("ripple", "波紋", "しずくが落ちて波紋が広がり、重なって消えていきます"),
     RIPPLE_TOP("ripple_top", "カラー波紋", "真上から見た水面に、色とりどりの波紋が広がります"),
@@ -438,30 +438,39 @@ private fun DrawScope.drawCircleVis(m: Meter, t: Float) {
 private fun DrawScope.drawWarp(m: Meter, t: Float) {
     drawRect(Color.Black)
     // 速度：音が大きいほど・低音が鳴るほど加速
-    val target = 0.8f + m.energy * 6f + m.bass * 5f
-    m.warpSpeed += (target - m.warpSpeed) * min(1f, m.dt * (if (target > m.warpSpeed) 6f else 1.2f))
-    m.tunnelZ += m.dt * m.warpSpeed * 0.5f
-    m.warpSpin += m.dt * (0.2f + m.energy)
+    // 速く・激しく：ビートで急加速し、トンネル全体が大きく回転・蛇行する
+    val target = 2.5f + m.energy * 14f + m.bass * 12f
+    m.warpSpeed += (target - m.warpSpeed) * min(1f, m.dt * (if (target > m.warpSpeed) 10f else 1.5f))
+    m.tunnelZ += m.dt * m.warpSpeed * 0.9f
+    m.warpSpin += m.dt * (0.8f + m.energy * 3f)
     val travel = m.tunnelZ
     val sx = (size.width / size.height * 0.65f).coerceAtLeast(1f)
     // トンネルの中心線がうねる（奥ほど大きくずれる）
     fun bend(z: Float): Offset {
         val w = travel + z
-        return Offset(size.width * 0.3f * sin(w * 0.9f + t * 0.3f), size.height * 0.32f * cos(w * 0.7f + t * 0.25f))
+        return Offset(size.width * 0.5f * sin(w * 1.3f + t * 0.9f), size.height * 0.55f * cos(w * 1.1f + t * 0.7f))
     }
     val near0 = bend(0.3f)
+    // 画面全体のロール（左右に大きく傾く）と、低音での揺れ
+    val roll = sin(t * 0.8f) * 0.9f + m.warpSpin * 0.25f
+    val cr = cos(roll)
+    val srl = sin(roll)
+    val shakeX = (m.rnd.nextFloat() - 0.5f) * size.height * 0.08f * m.bass
+    val shakeY = (m.rnd.nextFloat() - 0.5f) * size.height * 0.08f * m.bass
     fun proj(z: Float, ox: Float, oy: Float): Offset {
         val b = bend(z)
-        return Offset(size.width / 2 + ((b.x - near0.x) + ox * sx) / z * 0.9f, size.height / 2 + ((b.y - near0.y) + oy) / z * 0.9f)
+        val x = ((b.x - near0.x) + ox * sx) / z * 0.9f
+        val y = ((b.y - near0.y) + oy) / z * 0.9f
+        return Offset(size.width / 2 + x * cr - y * srl + shakeX, size.height / 2 + x * srl + y * cr + shakeY)
     }
-    val spacing = 0.22f
-    val count = 18
+    val spacing = 0.18f
+    val count = 24
     val phase = (travel / spacing) % 1f
     // 奥から手前へ輪を描く
     for (k in count - 1 downTo 0) {
         val z = 0.32f + (k + 1 - phase) * spacing
         val near = (1f - z / 4.3f).coerceIn(0f, 1f)
-        val hue = ((t * 30f + (travel + z) * 70f) % 360f + 360f) % 360f
+        val hue = ((t * 90f + (travel + z) * 120f) % 360f + 360f) % 360f
         val c = Color.hsv(hue, 0.75f, 1f)
         val r = size.height * 0.42f
         val center = proj(z, 0f, 0f)
@@ -484,11 +493,11 @@ private fun DrawScope.drawWarp(m: Meter, t: Float) {
         }
     }
     // 壁に沿って流れる光の筋
-    if (m.streaks.isEmpty()) repeat(70) {
+    if (m.streaks.isEmpty()) repeat(120) {
         m.streaks += Meter.Streak(m.rnd.nextFloat() * 6.283f, 0.3f + m.rnd.nextFloat() * 4f, 0.1f + m.rnd.nextFloat() * 0.3f, m.rnd.nextFloat())
     }
     for (s in m.streaks) {
-        s.z -= m.dt * m.warpSpeed * 0.5f
+        s.z -= m.dt * m.warpSpeed * 0.9f
         if (s.z <= 0.32f) {
             s.z = 4.3f
             s.angle = m.rnd.nextFloat() * 6.283f
@@ -505,7 +514,7 @@ private fun DrawScope.drawWarp(m: Meter, t: Float) {
     val far = proj(0.32f + count * spacing, 0f, 0f)
     val glow = size.height * (0.15f + 0.35f * m.energy)
     drawCircle(Brush.radialGradient(listOf(Color(0xCCFFFFFF), Color.Transparent), center = far, radius = glow), glow, far)
-    if (m.bass > 0.6f) drawRect(Color.White.copy(alpha = ((m.bass - 0.6f) * 0.3f).coerceAtMost(0.12f)))
+    if (m.bass > 0.5f) drawRect(Color.White.copy(alpha = ((m.bass - 0.5f) * 0.5f).coerceAtMost(0.2f)))
 }
 
 // ---------------- イルミネーション ----------------
@@ -1018,63 +1027,54 @@ private fun DrawScope.drawVfd(m: Meter) {
     }
 }
 
-// ---------------- VFDスペクトラム 3D（奥へ流れる、傾斜のきつい立体表示） ----------------
+// ---------------- VFDスペクトラム 3D（1層・台形の傾斜をきつく、奥へ進んでいく） ----------------
 
 private fun DrawScope.drawVfd3d(m: Meter) {
     drawRect(Color(0xFF050608))
-    val n = 12
+    val n = 14
     val segs = VfdRows.size
-    val depth = 8
-    m.vfd3dTimer += m.dt
-    if (m.vfd3dTimer > 0.07f) {
-        m.vfd3dTimer = 0f
-        m.vfd3dHistory.addFirst(m.bands(m.level, n))
-        while (m.vfd3dHistory.size > depth - 1) m.vfd3dHistory.removeLast()
-    }
+    val k = 0.22f
+    val floorY = size.height * 0.98f
+    val top = size.height * 0.05f
+    val zt = 1f + segs * k
+    val vpY = (top * zt - floorY) / (zt - 1f) // 一番上の段が top に来る消失点
     val vpX = size.width / 2
-    val vpY = size.height * 0.02f   // 消失点（画面の上の中央）
-    val floorY = size.height * 0.97f
-    val baseW = size.width * 0.98f
-    val step = 0.42f
-    fun proj(x: Float, y: Float, z: Float) = Offset(vpX + (x - vpX) / z, vpY + (y - vpY) / z)
-    // 床のグリッド
+    val baseW = size.width * 0.96f
+    fun p(x: Float, depth: Float): Offset {
+        val z = 1f + depth * k
+        return Offset(vpX + (x - vpX) / z, vpY + (floorY - vpY) / z)
+    }
+    // 床の線が手前へ流れてくる（音が大きいほど速く進む）
+    m.tunnelZ = (m.tunnelZ + m.dt * (1.2f + m.energy * 5f)) % 1f
     val grid = Color(0xFF4FB3FF)
-    for (k in 0..depth) {
-        val z = 1f + k * step
-        drawLine(grid.copy(alpha = 0.35f / (1f + k * 0.6f)), proj(vpX - baseW / 2, floorY, z), proj(vpX + baseW / 2, floorY, z), strokeWidth = 1f)
+    for (j in 0..segs + 1) {
+        val dep = j - m.tunnelZ
+        if (dep < 0f || dep > segs) continue
+        drawLine(
+            grid.copy(alpha = 0.3f / (1f + dep * 0.3f)),
+            p(vpX - baseW / 2 - size.width * 0.1f, dep), p(vpX + baseW / 2 + size.width * 0.1f, dep),
+            strokeWidth = 1.2f,
+        )
     }
-    for (i in 0..n) {
-        val x = vpX - baseW / 2 + baseW * i / n
-        drawLine(grid.copy(alpha = 0.15f), proj(x, floorY, 1f), proj(x, floorY, 1f + depth * step), strokeWidth = 1f)
-    }
-    val layers = listOf(m.bands(m.level, n)) + m.vfd3dHistory.toList()
-    val segH = size.height * 0.78f / segs
-    val colW = baseW / n * 0.74f
-    for (k in layers.indices.reversed()) {
-        val z = 1f + k * step
-        val lv = layers[k]
-        val dim = if (k == 0) 1f else max(0.12f, 0.75f / (1f + k * 0.8f))
+    drawLine(grid.copy(alpha = 0.25f), p(vpX - baseW / 2, 0f), p(vpX - baseW / 2, segs.toFloat()), strokeWidth = 1.2f)
+    drawLine(grid.copy(alpha = 0.25f), p(vpX + baseW / 2, 0f), p(vpX + baseW / 2, segs.toFloat()), strokeWidth = 1.2f)
+    val lv = m.bands(m.level, n)
+    val gap = 0.2f
+    val path = Path()
+    for (s in segs - 1 downTo 0) {
+        val c = VfdRows[s]
         for (i in 0 until n) {
             val lit = (lv[i] * segs + 0.5f).toInt().coerceIn(1, segs)
-            val cx = vpX - baseW / 2 + baseW * (i + 0.5f) / n
-            for (s in 0 until segs) {
-                if (s >= lit && k > 0) continue
-                val rowFrac = s / (segs - 1f)
-                val sh = 1f - 0.3f * rowFrac
-                val lean = 1f - 0.12f * rowFrac
-                val xa = vpX + (cx - colW * sh / 2 - vpX) * lean
-                val xb = vpX + (cx + colW * sh / 2 - vpX) * lean
-                val y0 = floorY - segH * (s + 1) + segH * 0.18f
-                val p1 = proj(xa, y0, z)
-                val p2 = proj(xb, y0 + segH * 0.64f, z)
-                val c = VfdRows[s]
-                if (s < lit) {
-                    if (k == 0) drawRect(c.copy(alpha = 0.22f), Offset(p1.x - 3f, p1.y - 3f), Size(p2.x - p1.x + 6f, p2.y - p1.y + 6f))
-                    drawRect(c.copy(alpha = dim), p1, Size(p2.x - p1.x, p2.y - p1.y))
-                } else {
-                    drawRect(c.copy(alpha = 0.06f), p1, Size(p2.x - p1.x, p2.y - p1.y))
-                }
-            }
+            val x0 = vpX - baseW / 2 + baseW * i / n + baseW / n * 0.13f
+            val x1 = x0 + baseW / n * 0.74f
+            path.reset()
+            val a = p(x0, s.toFloat())
+            path.moveTo(a.x, a.y)
+            p(x1, s.toFloat()).let { path.lineTo(it.x, it.y) }
+            p(x1, s + 1 - gap).let { path.lineTo(it.x, it.y) }
+            p(x0, s + 1 - gap).let { path.lineTo(it.x, it.y) }
+            path.close()
+            drawPath(path, c.copy(alpha = if (s < lit) 1f else 0.06f))
         }
     }
 }

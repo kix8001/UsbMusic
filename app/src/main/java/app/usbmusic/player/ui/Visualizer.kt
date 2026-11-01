@@ -1102,9 +1102,9 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     }
     if (time != m.timeStr) {
         m.timeStr = time
-        // 数字はドットフォント、「:」は四角いブロック2つで描く（昔の時計表示のように）
+        // 数字はドットフォント、「:」は数字と同じドット1つずつを上下に（昔の時計表示のように）
         val parts = time.split(':').map { textToDots(it) }
-        val colonW = 4
+        val colonW = 3
         val totalW = parts.sumOf { it.first } + colonW * (parts.size - 1)
         val bits = BooleanArray(totalW * DOT_ROWS)
         val colons = ArrayList<Int>()
@@ -1114,6 +1114,9 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
             x0 += pw
             if (idx < parts.size - 1) {
                 colons += x0
+                // 数字の高さ（2〜10段目）の中で上下対称に、ドット1つずつ
+                bits[4 * totalW + x0 + 1] = true
+                bits[8 * totalW + x0 + 1] = true
                 x0 += colonW
             }
         }
@@ -1169,14 +1172,6 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     }
     drawPoints(tl, PointMode.Points, VfdAmber.copy(alpha = 0.3f), strokeWidth = dotSize * 1.6f, cap = StrokeCap.Round)
     drawPoints(tl, PointMode.Points, VfdAmber, strokeWidth = dotSize, cap = StrokeCap.Round)
-    // 「:」は2×2の点をつなげた四角いブロック（数字の高さ 2〜10段目の中ほど）
-    val sq = ArrayList<Offset>()
-    for (c0 in m.timeColons) for (dc in 1..2) for (r in listOf(4, 5, 7, 8)) {
-        sq += Offset(timeX + (c0 + dc) * pitch + pitch / 2, dotY + r * pitch + pitch / 2)
-    }
-    drawPoints(sq, PointMode.Points, VfdAmber.copy(alpha = 0.3f), strokeWidth = pitch * 1.3f, cap = StrokeCap.Square)
-    drawPoints(sq, PointMode.Points, VfdAmber, strokeWidth = pitch * 0.92f, cap = StrokeCap.Square)
-
     // ---- スペクトラム（台形） ----
     val n = 14
     val segs = VfdRows.size

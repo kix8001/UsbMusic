@@ -1265,11 +1265,13 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
 
     // ---- 文字のギミック ----
     val small = min(h * 0.07f, baseW / n * 0.55f)
-    // 右の辺と同じ傾きで文字を斜めにする（上ほど左へ寄る）
-    val slant = ((x(0.5f, floorY) - x(0.5f, top)) / total).coerceIn(0f, 0.8f)
-    slantLabel("MAX", "", x(0.5f, top) + small * 0.5f, top + small * 0.4f, VfdCyan.copy(alpha = 0.85f), small * 1.05f, slant)
-    slantLabel("-6", "dB", x(0.56f, ys[7]) + small * 0.5f, ys[7] + small * 0.35f, VfdCyan.copy(alpha = 0.7f), small, slant)
-    slantLabel("-12", "dB", x(0.56f, ys[3]) + small * 0.5f, ys[3] + small * 0.35f, VfdCyan.copy(alpha = 0.7f), small, slant)
+    // 文字は少しだけ斜めにし、奥（上）にいくほど小さくする
+    val slant = (((x(0.5f, floorY) - x(0.5f, top)) / total) * 0.3f).coerceIn(0f, 0.22f)
+    fun depthScale(y: Float) = 0.5f + 0.5f * ((y - top) / total) // 上端 0.5 〜 下端 1.0
+    val base = small * 1.3f
+    slantLabel("MAX", "", x(0.5f, top) + small * 0.4f, top + base * depthScale(top) * 0.4f, VfdCyan.copy(alpha = 0.85f), base * depthScale(top), slant)
+    slantLabel("-6", "dB", x(0.56f, ys[7]) + small * 0.4f, ys[7] + base * depthScale(ys[7]) * 0.35f, VfdCyan.copy(alpha = 0.75f), base * depthScale(ys[7]), slant)
+    slantLabel("-12", "dB", x(0.56f, ys[3]) + small * 0.4f, ys[3] + base * depthScale(ys[3]) * 0.35f, VfdCyan.copy(alpha = 0.75f), base * depthScale(ys[3]), slant)
     val freqs = listOf("50", "125", "250", "630", "1.5k", "3.5k", "8k")
     for ((k, f) in freqs.withIndex()) {
         val u = -0.5f + (k * 2 + 1f) / n

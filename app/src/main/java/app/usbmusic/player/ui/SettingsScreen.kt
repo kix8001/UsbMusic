@@ -101,7 +101,8 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         ActionRow("アルバムアートを読み込み直す") { vm.clearArtCache() }
 
         SectionHeader("このアプリについて")
-        InfoRow("mTunes 0.6.9")
+        InfoRow("mTunes 0.7.0")
+        InfoRow("MAKOTO MORITA MADE")
     }
 }
 

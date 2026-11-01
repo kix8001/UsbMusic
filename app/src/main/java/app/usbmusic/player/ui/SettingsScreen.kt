@@ -60,6 +60,25 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
             }
         }
 
+        // 通知がオフだと、ナビのメディア再生バー（ホーム画面下）に表示されない
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        var notifOn by remember { mutableStateOf(androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                notifOn = androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+                kotlinx.coroutines.delay(1500)
+            }
+        }
+        if (!notifOn) {
+            SectionHeader("ナビのメディア再生バー")
+            InfoRow("通知がオフのため、ナビのホーム画面下のメディア再生バーに mTunes が表示されません。")
+            ActionRow("通知をオンにする（設定を開く）") {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                runCatching { ctx.startActivity(intent) }
+            }
+        }
+
         SectionHeader("再生")
         SwitchRow("アプリを開いたら前回の続きを自動再生", autoResume) {
             autoResume = it
@@ -101,7 +120,7 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         ActionRow("アルバムアートを読み込み直す") { vm.clearArtCache() }
 
         SectionHeader("このアプリについて")
-        InfoRow("mTunes 0.7.1")
+        InfoRow("mTunes 0.7.2")
         InfoRow("MAKOTO MORITA MADE")
     }
 }

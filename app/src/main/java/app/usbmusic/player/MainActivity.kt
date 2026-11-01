@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         conn = PlayerConnection(applicationContext)
         refreshPermission()
-        if (!permitted || !videoGranted()) askPermissions()
+        if (!permitted || !videoGranted() || !notifyGranted()) askPermissions()
         handleVoiceIntent(intent)
         setContent {
             App(
@@ -95,6 +95,11 @@ class MainActivity : ComponentActivity() {
     private fun audioPermission(): String =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
+
+    /** 通知（ナビのメディア再生バーに表示されるのに必要） */
+    private fun notifyGranted(): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     private fun videoGranted(): Boolean =
         Build.VERSION.SDK_INT < 33 ||

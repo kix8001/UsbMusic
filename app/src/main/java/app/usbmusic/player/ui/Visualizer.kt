@@ -23,6 +23,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -171,6 +173,18 @@ private class Meter {
     var vfd3dTimer = 0f
     var tunnelZ = 0f
 
+    // VFD 3D：表示の幅を曲の音量に合わせる基準と、ドット文字の横スクロール
+    var vfdRef = 0.6f
+    var dotText = ""
+    var dotW = 0
+    var dotBits = BooleanArray(0)
+    var timeStr = ""
+    var timeW = 0
+    var timeBits = BooleanArray(0)
+    var dotOff = 0f
+    var dotState = 0
+    var dotTimer = 0f
+
     // アナログVUの針（ばねのように動く）
     val needle = FloatArray(2)
     val needleVel = FloatArray(2)
@@ -185,8 +199,12 @@ fun Visualizer(
     playing: Boolean,
     modifier: Modifier = Modifier,
     onTap: (() -> Unit)? = null,
+    caption: String = "",
+    timeText: () -> String = { "" },
 ) {
     if (style == VisStyle.OFF) return
+    val currentCaption by rememberUpdatedState(caption)
+    val currentTime by rememberUpdatedState(timeText)
     val meter = remember { Meter() }
     var frame by remember { mutableLongStateOf(0L) }
     val isPlaying by rememberUpdatedState(playing)
@@ -229,7 +247,7 @@ fun Visualizer(
                 VisStyle.RETRO_LR_CENTER -> drawRetroLRCenter(meter)
                 VisStyle.VU -> drawVu(meter)
                 VisStyle.VFD -> drawVfd(meter)
-                VisStyle.VFD3D -> drawVfd3d(meter)
+                VisStyle.VFD3D -> drawVfd3d(meter, currentCaption, currentTime())
                 VisStyle.RIPPLE -> drawRipple(meter, t)
                 VisStyle.RIPPLE_TOP -> drawRippleTop(meter, t)
                 VisStyle.WAVE -> drawWave(meter)
@@ -1028,38 +1046,142 @@ private fun DrawScope.drawVfd(m: Meter) {
     }
 }
 
-// ---------------- VFDスペクトラム 3D（1層・低く横に広い台形。上の幅は下の約2割） ----------------
+// ---------------- VFDスペクトラム 3D（1層・低く横に広い台形＋昔のカーステ風の表示） ----------------
 
-private fun DrawScope.drawVfd3d(m: Meter) {
+private const val DOT_ROWS = 14
+private val VfdCyan = Color(0xFF7FE0FF)
+private val VfdAmber = Color(0xFFFFD84A)
+
+/** 文字を小さな白黒の点の集まりに変換（日本語もそのままドット表示できる） */
+private fun textToDots(text: String): Pair<Int, BooleanArray> {
+    if (text.isEmpty()) return 0 to BooleanArray(0)
+    val paint = Paint().apply {
+        isAntiAlias = false
+        textSize = 12.5f
+        typeface = Typeface.DEFAULT
+        color = android.graphics.Color.WHITE
+    }
+    val w = (paint.measureText(text) + 2).toInt().coerceIn(1, 4000)
+    val bmp = android.graphics.Bitmap.createBitmap(w, DOT_ROWS, android.graphics.Bitmap.Config.ARGB_8888)
+    android.graphics.Canvas(bmp).drawText(text, 0f, 11f, paint)
+    val px = IntArray(w * DOT_ROWS)
+    bmp.getPixels(px, 0, w, 0, 0, w, DOT_ROWS)
+    bmp.recycle()
+    return w to BooleanArray(px.size) { (px[it] ushr 24) > 100 }
+}
+
+private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     drawRect(Color(0xFF050608))
+    val w = size.width
+    val h = size.height
+
+    // ---- 上段：ドット文字（曲名 / アーティスト）と再生時間 ----
+    val pitch = h * 0.2f / DOT_ROWS
+    val dotY = h * 0.02f
+    if (caption != m.dotText) {
+        m.dotText = caption
+        val (tw, bits) = textToDots(caption)
+        m.dotW = tw
+        m.dotBits = bits
+        m.dotOff = 0f
+        m.dotState = 0
+        m.dotTimer = 0f
+    }
+    if (time != m.timeStr) {
+        m.timeStr = time
+        val (tw, bits) = textToDots(time)
+        m.timeW = tw
+        m.timeBits = bits
+    }
+    val timeWidth = m.timeW * pitch
+    val textX = w * 0.02f
+    val visible = ((w * 0.96f - timeWidth - pitch * 4) / pitch).toInt().coerceAtLeast(4)
+    // 横スクロール：止まる → ゆっくり流れる → 端で止まる → 流れ去る → 右から入ってくる …
+    if (m.dotW > visible) {
+        m.dotTimer += m.dt
+        val speed = 9f // 1秒に進むドット数
+        when (m.dotState) {
+            0 -> if (m.dotTimer > 2.5f) { m.dotState = 1; m.dotTimer = 0f }
+            1 -> {
+                m.dotOff += speed * m.dt
+                if (m.dotOff >= m.dotW - visible) { m.dotOff = (m.dotW - visible).toFloat(); m.dotState = 2; m.dotTimer = 0f }
+            }
+            2 -> if (m.dotTimer > 2f) { m.dotState = 3; m.dotTimer = 0f }
+            3 -> {
+                m.dotOff += speed * 1.5f * m.dt
+                if (m.dotOff >= m.dotW) { m.dotOff = -visible.toFloat(); m.dotState = 4 }
+            }
+            4 -> {
+                m.dotOff += speed * 1.5f * m.dt
+                if (m.dotOff >= 0f) { m.dotOff = 0f; m.dotState = 0; m.dotTimer = 0f }
+            }
+        }
+    } else {
+        m.dotOff = 0f
+    }
+    val off = m.dotOff.toInt()
+    val dim = ArrayList<Offset>(visible * DOT_ROWS)
+    val lit = ArrayList<Offset>()
+    for (c in 0 until visible) {
+        val src = c + off
+        for (r in 0 until DOT_ROWS) {
+            val p = Offset(textX + c * pitch + pitch / 2, dotY + r * pitch + pitch / 2)
+            if (src in 0 until m.dotW && m.dotBits[r * m.dotW + src]) lit += p else dim += p
+        }
+    }
+    val dotSize = pitch * 0.76f
+    drawPoints(dim, PointMode.Points, VfdCyan.copy(alpha = 0.09f), strokeWidth = dotSize, cap = StrokeCap.Round)
+    drawPoints(lit, PointMode.Points, VfdCyan.copy(alpha = 0.3f), strokeWidth = dotSize * 1.6f, cap = StrokeCap.Round)
+    drawPoints(lit, PointMode.Points, VfdCyan, strokeWidth = dotSize, cap = StrokeCap.Round)
+    // 再生時間（琥珀色のドット）
+    val timeX = w * 0.98f - timeWidth
+    val tl = ArrayList<Offset>()
+    for (c in 0 until m.timeW) for (r in 0 until DOT_ROWS) {
+        if (m.timeBits[r * m.timeW + c]) tl += Offset(timeX + c * pitch + pitch / 2, dotY + r * pitch + pitch / 2)
+    }
+    drawPoints(tl, PointMode.Points, VfdAmber.copy(alpha = 0.3f), strokeWidth = dotSize * 1.6f, cap = StrokeCap.Round)
+    drawPoints(tl, PointMode.Points, VfdAmber, strokeWidth = dotSize, cap = StrokeCap.Round)
+
+    // ---- スペクトラム（台形） ----
     val n = 14
     val segs = VfdRows.size
-    val ratio = 0.9f       // 上の段ほど少しずつ低くして奥行きを出す
-    val topScale = 0.2f    // 一番上の幅は一番下の2割
-    val floorY = size.height * 0.97f
-    val top = size.height * 0.06f
+    val ratio = 0.9f
+    val topScale = 0.2f
+    val floorY = h * 0.84f
+    val top = h * 0.27f
     val total = floorY - top
     val h0 = total * (1 - ratio) / (1 - ratio.pow(segs))
     val ys = FloatArray(segs + 1)
     ys[0] = floorY
     for (s in 0 until segs) ys[s + 1] = ys[s] - h0 * ratio.pow(s)
-    val cx = size.width / 2
-    val baseW = size.width * 0.96f
-    fun x(u: Float, y: Float): Float {
-        val f = (floorY - y) / total
-        return cx + u * baseW * (1 - (1 - topScale) * f)
+    val cx = w / 2
+    val baseW = w * 0.9f
+    fun x(u: Float, y: Float): Float = cx + u * baseW * (1 - (1 - topScale) * ((floorY - y) / total))
+
+    // ガイドの破線
+    val dash = PathEffect.dashPathEffect(floatArrayOf(7f, 7f))
+    for (s in listOf(3, 7)) {
+        val y = ys[s]
+        drawLine(VfdCyan.copy(alpha = 0.35f), Offset(x(-0.56f, y), y), Offset(x(0.56f, y), y), strokeWidth = 1.2f, pathEffect = dash)
     }
-    val rail = Color(0xFF4FB3FF).copy(alpha = 0.25f)
+    drawLine(VfdCyan.copy(alpha = 0.25f), Offset(cx, floorY), Offset(cx, top - 6f), strokeWidth = 1.2f, pathEffect = dash)
+    val rail = VfdCyan.copy(alpha = 0.2f)
     drawLine(rail, Offset(x(-0.5f, floorY), floorY), Offset(x(-0.5f, top), top), strokeWidth = 1.2f)
     drawLine(rail, Offset(x(0.5f, floorY), floorY), Offset(x(0.5f, top), top), strokeWidth = 1.2f)
-    val lv = m.bands(m.level, n)
+
+    // 表示の幅を曲の音量に合わせて自動調整（一番大きい帯域が上の方まで届くようにする）
+    val raw = m.bands(m.level, n)
+    val frameMax = raw.max()
+    m.vfdRef = max(frameMax, m.vfdRef - m.dt * 0.1f).coerceAtLeast(0.35f)
+    val lv = FloatArray(n) { (((raw[it] / m.vfdRef) - 0.12f) / 0.88f).coerceIn(0f, 1f) }
+
     val path = Path()
     for (s in 0 until segs) {
         val y0 = ys[s]
         val y1 = ys[s + 1] + (ys[s] - ys[s + 1]) * 0.22f
         val c = VfdRows[s]
         for (i in 0 until n) {
-            val lit = (lv[i] * segs + 0.5f).toInt().coerceIn(1, segs)
+            val litN = (lv[i] * segs + 0.5f).toInt().coerceIn(1, segs)
             val u0 = -0.5f + (i + 0.13f) / n
             val u1 = -0.5f + (i + 0.87f) / n
             path.reset()
@@ -1068,7 +1190,7 @@ private fun DrawScope.drawVfd3d(m: Meter) {
             path.lineTo(x(u1, y1), y1)
             path.lineTo(x(u0, y1), y1)
             path.close()
-            if (s < lit) {
+            if (s < litN) {
                 drawPath(path, c.copy(alpha = 0.25f), style = Stroke(width = 4f))
                 drawPath(path, c)
             } else {
@@ -1076,4 +1198,18 @@ private fun DrawScope.drawVfd3d(m: Meter) {
             }
         }
     }
+
+    // ---- 文字のギミック ----
+    val small = min(h * 0.07f, baseW / n * 0.55f)
+    label("MAX", x(0.5f, top) + small * 1.6f, top + small * 0.4f, VfdCyan.copy(alpha = 0.8f), small)
+    label("-6", x(0.56f, ys[7]) + small * 1.2f, ys[7] + small * 0.35f, VfdCyan.copy(alpha = 0.6f), small * 0.85f, bold = false)
+    label("-12", x(0.56f, ys[3]) + small * 1.4f, ys[3] + small * 0.35f, VfdCyan.copy(alpha = 0.6f), small * 0.85f, bold = false)
+    val freqs = listOf("50", "125", "250", "630", "1.5k", "3.5k", "8k")
+    for ((k, f) in freqs.withIndex()) {
+        val u = -0.5f + (k * 2 + 1f) / n
+        label(f, x(u, floorY), floorY + small * 1.25f, VfdCyan.copy(alpha = 0.85f), small, bold = false)
+    }
+    val cap = "GRAPHIC EQUALIZER / SPECTRUM ANALYZER"
+    val capSize = min(h * 0.055f, w / (cap.length * 0.62f))
+    label(cap, cx, h * 0.985f, VfdCyan.copy(alpha = 0.55f), capSize, bold = false)
 }

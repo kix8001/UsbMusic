@@ -181,6 +181,7 @@ private class Meter {
     var timeStr = ""
     var timeW = 0
     var timeBits = BooleanArray(0)
+    var timeColons = IntArray(0)
     var dotOff = 0f
     var dotState = 0
     var dotTimer = 0f
@@ -1101,9 +1102,24 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     }
     if (time != m.timeStr) {
         m.timeStr = time
-        val (tw, bits) = textToDots(time)
-        m.timeW = tw
+        // 数字はドットフォント、「:」は四角いブロック2つで描く（昔の時計表示のように）
+        val parts = time.split(':').map { textToDots(it) }
+        val colonW = 4
+        val totalW = parts.sumOf { it.first } + colonW * (parts.size - 1)
+        val bits = BooleanArray(totalW * DOT_ROWS)
+        val colons = ArrayList<Int>()
+        var x0 = 0
+        parts.forEachIndexed { idx, (pw, pb) ->
+            for (r in 0 until DOT_ROWS) for (c in 0 until pw) bits[r * totalW + x0 + c] = pb[r * pw + c]
+            x0 += pw
+            if (idx < parts.size - 1) {
+                colons += x0
+                x0 += colonW
+            }
+        }
+        m.timeW = totalW
         m.timeBits = bits
+        m.timeColons = colons.toIntArray()
     }
     val timeWidth = m.timeW * pitch
     val textX = w * 0.02f
@@ -1153,6 +1169,13 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     }
     drawPoints(tl, PointMode.Points, VfdAmber.copy(alpha = 0.3f), strokeWidth = dotSize * 1.6f, cap = StrokeCap.Round)
     drawPoints(tl, PointMode.Points, VfdAmber, strokeWidth = dotSize, cap = StrokeCap.Round)
+    // 「:」は2×2の点をつなげた四角いブロック（数字の高さ 2〜10段目の中ほど）
+    val sq = ArrayList<Offset>()
+    for (c0 in m.timeColons) for (dc in 1..2) for (r in listOf(4, 5, 7, 8)) {
+        sq += Offset(timeX + (c0 + dc) * pitch + pitch / 2, dotY + r * pitch + pitch / 2)
+    }
+    drawPoints(sq, PointMode.Points, VfdAmber.copy(alpha = 0.3f), strokeWidth = pitch * 1.3f, cap = StrokeCap.Square)
+    drawPoints(sq, PointMode.Points, VfdAmber, strokeWidth = pitch * 0.92f, cap = StrokeCap.Square)
 
     // ---- スペクトラム（台形） ----
     val n = 14

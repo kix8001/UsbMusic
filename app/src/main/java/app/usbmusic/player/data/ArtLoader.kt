@@ -69,8 +69,24 @@ object ArtLoader {
         }
     }
 
+    /** アルバムアートの保存先（再生サービスからも使う） */
+    fun fileFor(context: Context, albumKey: String): File = File(context.cacheDir, "art/${md5(albumKey)}.jpg")
+
+    /** アートの画像ファイルを用意する（無ければ曲から取り出す）。ナビ等に渡す再生情報用 */
+    fun ensureFile(context: Context, uri: String, albumKey: String, cover: String?): File? {
+        val file = fileFor(context, albumKey)
+        if (file.exists()) return file
+        if (albumKey in missing) return null
+        val bytes = extractBytes(context, uri, cover, uri.startsWith("content://media")) ?: return null
+        return if (writeJpeg(bytes, file)) file else null
+    }
+
     private fun extractToFile(context: Context, track: Track, file: File): Boolean {
-        val bytes = extractBytes(context, track) ?: return false
+        val bytes = extractBytes(context, track.uri, track.cover, track.fromMediaStore) ?: return false
+        return writeJpeg(bytes, file)
+    }
+
+    private fun writeJpeg(bytes: ByteArray, file: File): Boolean {
         val bmp = decodeBytes(bytes, MAX_STORED) ?: return false
         val dir = file.parentFile ?: return false
         dir.mkdirs()
@@ -84,8 +100,8 @@ object ArtLoader {
         return ok
     }
 
-    private fun extractBytes(context: Context, track: Track): ByteArray? {
-        val uri = Uri.parse(track.uri)
+    private fun extractBytes(context: Context, uriStr: String, cover: String?, fromMediaStore: Boolean): ByteArray? {
+        val uri = Uri.parse(uriStr)
         val embedded = runCatching {
             val r = MediaMetadataRetriever()
             try {
@@ -97,14 +113,14 @@ object ArtLoader {
         }.getOrNull()
         if (embedded != null && embedded.isNotEmpty()) return embedded
 
-        track.cover?.let { cover ->
+        cover?.let { c ->
             val bytes = runCatching {
-                context.contentResolver.openInputStream(Uri.parse(cover))?.use { it.readBytes() }
+                context.contentResolver.openInputStream(Uri.parse(c))?.use { it.readBytes() }
             }.getOrNull()
             if (bytes != null && bytes.isNotEmpty()) return bytes
         }
 
-        if (track.fromMediaStore) {
+        if (fromMediaStore) {
             val thumb = runCatching {
                 val bmp = context.contentResolver.loadThumbnail(uri, Size(MAX_STORED, MAX_STORED), null)
                 val out = ByteArrayOutputStream()

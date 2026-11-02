@@ -11,8 +11,13 @@ import app.usbmusic.player.data.Video
 object MediaItems {
     private const val KEY_SUBS = "subs"
     private const val KEY_VKEY = "vkey"
+    private const val KEY_ART = "akey"
+    private const val KEY_COVER = "cover"
 
-    fun from(t: Track): MediaItem = build(t.uri, t.title, t.displayArtist, t.album, t.albumArtist, videoKey = t.pathKey.ifBlank { null })
+    fun from(t: Track): MediaItem = build(
+        t.uri, t.title, t.displayArtist, t.album, t.albumArtist,
+        videoKey = t.pathKey.ifBlank { null }, artKey = t.albumKey, cover = t.cover,
+    )
 
     fun from(v: Video): MediaItem = build(
         v.uri, v.title, v.artist.ifBlank { v.folderName.ifBlank { "動画" } }, v.album.ifBlank { null }, null,
@@ -28,6 +33,8 @@ object MediaItems {
         video: Boolean = false,
         subs: List<String> = emptyList(),
         videoKey: String? = null,
+        artKey: String? = null,
+        cover: String? = null,
     ): MediaItem {
         val meta = MediaMetadata.Builder()
             .setTitle(title)
@@ -36,14 +43,19 @@ object MediaItems {
             .setAlbumArtist(albumArtist?.ifBlank { null })
             .setIsPlayable(true)
             .setMediaType(if (video) MediaMetadata.MEDIA_TYPE_VIDEO else MediaMetadata.MEDIA_TYPE_MUSIC)
-        if (subs.isNotEmpty() || videoKey != null) meta.setExtras(
+        if (subs.isNotEmpty() || videoKey != null || artKey != null) meta.setExtras(
             Bundle().apply {
                 if (subs.isNotEmpty()) putStringArrayList(KEY_SUBS, ArrayList(subs))
                 if (videoKey != null) putString(KEY_VKEY, videoKey)
+                if (artKey != null) putString(KEY_ART, artKey)
+                if (cover != null) putString(KEY_COVER, cover)
             }
         )
         return withLocal(MediaItem.Builder().setMediaId(id).setMediaMetadata(meta.build()).build())
     }
+
+    fun artKeyOf(item: MediaItem): String? = item.mediaMetadata.extras?.getString(KEY_ART)
+    fun coverOf(item: MediaItem): String? = item.mediaMetadata.extras?.getString(KEY_COVER)
 
     fun isVideo(item: MediaItem?): Boolean = item?.mediaMetadata?.mediaType == MediaMetadata.MEDIA_TYPE_VIDEO
 

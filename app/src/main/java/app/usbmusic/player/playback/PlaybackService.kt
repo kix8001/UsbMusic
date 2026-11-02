@@ -26,6 +26,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import app.usbmusic.player.data.VideoPositions
 import android.os.SystemClock
+import app.usbmusic.player.data.ArtLoader
 import app.usbmusic.player.data.Prefs
 import org.json.JSONArray
 import kotlin.math.abs
@@ -103,6 +104,7 @@ class PlaybackService : MediaSessionService() {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 itemStart = SystemClock.elapsedRealtime()
                 announce("com.android.music.metachanged")
+                ensureArtwork()
                 applyItemGain()
                 flushVideo()
                 trackVideo()
@@ -157,6 +159,7 @@ class PlaybackService : MediaSessionService() {
 
         restoreState()
         applyItemGain()
+        ensureArtwork()
         handler.postDelayed(periodicSave, 10_000)
         handler.postDelayed(videoTick, 1_000)
         handler.post(fadeTick)
@@ -194,6 +197,31 @@ class PlaybackService : MediaSessionService() {
             val resolved = mediaItems.map { MediaItems.withLocal(it) }
             return Futures.immediateFuture(resolved.toMutableList())
         }
+    }
+
+    /**
+     * 再生情報にアルバムアートを付ける（通知や、再生情報を読むナビのホーム画面などに表示される）。
+     * 画像の取り出しは裏で行い、終わったら今の曲の情報だけを差し替える（再生は途切れない）
+     */
+    private fun ensureArtwork() {
+        val item = player.currentMediaItem ?: return
+        if (item.mediaMetadata.artworkUri != null || item.mediaMetadata.artworkData != null) return
+        val akey = MediaItems.artKeyOf(item) ?: return
+        val index = player.currentMediaItemIndex
+        val cover = MediaItems.coverOf(item)
+        Thread {
+            val file = runCatching { ArtLoader.ensureFile(this, item.mediaId, akey, cover) }.getOrNull() ?: return@Thread
+            handler.post {
+                if (index < player.mediaItemCount && player.currentMediaItemIndex == index &&
+                    player.currentMediaItem?.mediaId == item.mediaId
+                ) {
+                    val updated = item.buildUpon()
+                        .setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(Uri.fromFile(file)).build())
+                        .build()
+                    runCatching { player.replaceMediaItem(index, updated) }
+                }
+            }
+        }.start()
     }
 
     /** この曲・動画だけの音量（記憶してある分）を適用 */
@@ -292,6 +320,8 @@ class PlaybackService : MediaSessionService() {
                     .put("a", m.artist?.toString() ?: "")
                     .put("al", m.albumTitle?.toString() ?: "")
                     .put("aa", m.albumArtist?.toString() ?: "")
+                    .put("ak", MediaItems.artKeyOf(item) ?: "")
+                    .put("cv", MediaItems.coverOf(item) ?: "")
                     .put("v", MediaItems.isVideo(item))
                     .put("s", JSONArray(MediaItems.subtitlesOf(item)))
                     .put("k", if (MediaItems.isVideo(item)) MediaItems.videoKeyOf(item) else "")
@@ -322,6 +352,8 @@ class PlaybackService : MediaSessionService() {
                     o.getString("id"), o.optString("t"), o.optString("a"), o.optString("al"), o.optString("aa"),
                     video = o.optBoolean("v", false), subs = subs,
                     videoKey = o.optString("k").ifBlank { null },
+                    artKey = o.optString("ak").ifBlank { null },
+                    cover = o.optString("cv").ifBlank { null },
                 )
             }
         }.getOrNull()

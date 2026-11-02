@@ -102,6 +102,7 @@ class PlaybackService : MediaSessionService() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 itemStart = SystemClock.elapsedRealtime()
+                announce("com.android.music.metachanged")
                 applyItemGain()
                 flushVideo()
                 trackVideo()
@@ -109,6 +110,7 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                announce("com.android.music.playstatechanged")
                 if (isPlaying) {
                     errorStreak = 0
                     // しばらく正常に再生できたら、次の一時的なエラーでも再生し直せるようにする
@@ -198,6 +200,35 @@ class PlaybackService : MediaSessionService() {
     private fun applyItemGain() {
         val item = player.currentMediaItem
         VolumeLeveler.itemGain = if (item == null) 1f else ItemGains.linear(ItemGains.get(this, MediaItems.keyOf(item)))
+    }
+
+    /**
+     * 昔からある「曲が変わった・再生状態が変わった」の合図を送る。
+     * 車載ナビのホーム画面のメディアバーやウィジェットには、これを見て表示するものが多い
+     */
+    private fun announce(action: String) {
+        val item = player.currentMediaItem ?: return
+        val m = item.mediaMetadata
+        val playing = player.isPlaying
+        val dur = player.duration.takeIf { it > 0 } ?: 0L
+        run {
+            val a = action
+            runCatching {
+                sendBroadcast(
+                    Intent(a)
+                        .putExtra("id", item.mediaId.hashCode().toLong())
+                        .putExtra("track", m.title?.toString().orEmpty())
+                        .putExtra("artist", m.artist?.toString().orEmpty())
+                        .putExtra("album", m.albumTitle?.toString().orEmpty())
+                        .putExtra("playing", playing)
+                        .putExtra("isPlaying", playing)
+                        .putExtra("duration", dur)
+                        .putExtra("position", player.currentPosition)
+                        .putExtra("package", packageName)
+                        .putExtra("app", "mTunes")
+                )
+            }
+        }
     }
 
     // ---------- 動画の切り替え時のフェード（音） ----------

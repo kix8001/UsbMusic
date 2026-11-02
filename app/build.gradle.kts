@@ -12,8 +12,8 @@ android {
         applicationId = "app.usbmusic.player"
         minSdk = 29
         targetSdk = 34
-        versionCode = 26
-        versionName = "0.7.2"
+        versionCode = 27
+        versionName = "0.7.3"
     }
 
     signingConfigs {

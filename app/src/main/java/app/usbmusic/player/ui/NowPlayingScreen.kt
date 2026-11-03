@@ -233,6 +233,8 @@ private fun PlayerPanel(
                 onTap = onVisTap,
                 caption = listOf(track.title, track.displayArtist).filter { it.isNotBlank() }.joinToString("  /  "),
                 timeText = { fmtTime(conn.position) },
+                title = track.title,
+                artist = track.displayArtist,
             )
         }
     }

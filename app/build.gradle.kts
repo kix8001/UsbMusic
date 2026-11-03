@@ -12,8 +12,8 @@ android {
         applicationId = "app.usbmusic.player"
         minSdk = 29
         targetSdk = 34
-        versionCode = 30
-        versionName = "0.7.6"
+        versionCode = 31
+        versionName = "0.7.7"
     }
 
     signingConfigs {
@@ -48,6 +48,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // 設定画面のバージョン表示に BuildConfig.VERSION_NAME を使う
+        buildConfig = true
     }
     lint {
         abortOnError = false

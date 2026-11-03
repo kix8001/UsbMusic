@@ -61,7 +61,6 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     LIGHTS("lights", "イルミネーション", "色が流れる電球が音に合わせて点灯します"),
     RIPPLE("ripple", "波紋", "しずくが落ちて波紋が広がり、重なって消えていきます"),
     RIPPLE_TOP("ripple_top", "カラー波紋", "真上から見た水面に、色とりどりの波紋が広がります"),
-    FLICKER("flicker", "ゆらぐ電灯", "古い電球がチラついたり、消えかけたりします"),
     ;
 
     companion object {
@@ -147,7 +146,7 @@ private class Meter {
         return out
     }
 
-    // ライトリボン・ワープ・電灯で使う動きの状態
+    // ライトリボン・ワープで使う動きの状態
 
     class Streak(var angle: Float, var z: Float, var len: Float, var hue: Float)
     val streaks = ArrayList<Streak>()
@@ -189,9 +188,6 @@ private class Meter {
     // アナログVUの針（ばねのように動く）
     val needle = FloatArray(2)
     val needleVel = FloatArray(2)
-
-    class Lamp(var bright: Float = 1f, var target: Float = 1f, var state: Int = 0, var timer: Float = 0f, var chatter: Float = 0f)
-    val lamps = ArrayList<Lamp>()
 }
 
 @Composable
@@ -260,7 +256,6 @@ fun Visualizer(
                 VisStyle.CIRCLE -> drawCircleVis(meter, t)
                 VisStyle.WARP -> drawWarp(meter, t)
                 VisStyle.LIGHTS -> drawLights(meter, t)
-                VisStyle.FLICKER -> drawFlicker(meter, t)
                 VisStyle.OFF -> Unit
             }
         }
@@ -521,6 +516,11 @@ private fun DrawScope.drawWarp(m: Meter, t: Float) {
     if (m.streaks.isEmpty()) repeat(120) {
         m.streaks += Meter.Streak(m.rnd.nextFloat() * 6.283f, 0.3f + m.rnd.nextFloat() * 4f, 0.1f + m.rnd.nextFloat() * 0.3f, m.rnd.nextFloat())
     }
+    // 光の筋は壁面（輪の半径のすぐ内側）に貼りつき、奥行きに沿って壁の上を
+    // 螺旋状に蛇行する。筋を何点かに区切って描くので、トンネルの曲がりにも沿って曲がる
+    val rr = size.height * 0.4f
+    val wallPts = 10
+    val pts = arrayOfNulls<Offset>(wallPts + 1)
     for (s in m.streaks) {
         s.z -= m.dt * m.warpSpeed * 0.7f
         if (s.z <= 0.32f) {
@@ -528,12 +528,25 @@ private fun DrawScope.drawWarp(m: Meter, t: Float) {
             s.angle = m.rnd.nextFloat() * 6.283f
             s.hue = m.rnd.nextFloat()
         }
-        val rr = size.height * 0.4f
-        val a = s.angle + m.warpSpin * 0.3f
-        val p1 = proj(s.z, cos(a) * rr, sin(a) * rr)
-        val p2 = proj(s.z + s.len * (0.5f + m.warpSpeed * 0.3f), cos(a) * rr, sin(a) * rr)
+        val len = s.len * (0.9f + m.warpSpeed * 0.45f)
+        for (j in 0..wallPts) {
+            val z = s.z + len * j / wallPts
+            val w = travel + z
+            // 壁の上でのうねり：ゆっくりした螺旋＋筋ごとに位相の違う蛇行
+            val a = s.angle + m.warpSpin * 0.3f + w * 0.55f + sin(w * 2.1f + s.hue * 6.283f + t * 0.8f) * 0.45f
+            val wr = rr * (0.97f + 0.03f * sin(w * 3f + s.hue * 10f))
+            pts[j] = proj(z, cos(a) * wr, sin(a) * wr)
+        }
         val near = (1f - s.z / 4.3f).coerceIn(0f, 1f)
-        drawLine(Color.White.copy(alpha = near * 0.8f), p2, p1, strokeWidth = 1f + near * 2.5f, cap = StrokeCap.Round)
+        val tint = Color.hsv(((t * 35f + (travel + s.z) * 80f) % 360f + 360f) % 360f, 0.55f, 1f)
+        for (j in 0 until wallPts) {
+            // 先頭（手前）ほど明るく太い光にし、尾は細く消えていく
+            val k = 1f - j / wallPts.toFloat()
+            val p1 = pts[j]!!
+            val p2 = pts[j + 1]!!
+            drawLine(tint.copy(alpha = near * 0.35f * k), p1, p2, strokeWidth = (1f + near * 2.5f) * 2.6f * k + 1f, cap = StrokeCap.Round)
+            drawLine(Color.White.copy(alpha = near * 0.85f * k), p1, p2, strokeWidth = (1f + near * 2.5f) * k + 0.5f, cap = StrokeCap.Round)
+        }
     }
     // 出口の光
     val far = proj(0.32f + count * spacing, 0f, 0f)
@@ -576,78 +589,6 @@ private fun DrawScope.drawLights(m: Meter, t: Float) {
                 drawCircle(Color(0x1FFFFFFF), radius = r * 0.7f, center = Offset(cx, cy))
             }
         }
-    }
-}
-
-// ---------------- ゆらぐ電灯（チラつき・消えかけ） ----------------
-
-private fun DrawScope.drawFlicker(m: Meter, t: Float) {
-    drawRect(Color(0xFF080605))
-    val count = 4
-    if (m.lamps.size != count) {
-        m.lamps.clear()
-        repeat(count) { m.lamps += Meter.Lamp() }
-    }
-    val dt = m.dt
-    val music = 0.7f + 0.3f * (m.energy * 1.8f).coerceAtMost(1f)
-    for ((i, lamp) in m.lamps.withIndex()) {
-        // 状態：0=安定 1=消えかけてゆっくり暗くなる 2=チラチラ 3=復帰
-        lamp.timer -= dt
-        when (lamp.state) {
-            0 -> {
-                lamp.target = 1f
-                if (lamp.timer <= 0f) {
-                    lamp.timer = 1f
-                    val r = m.rnd.nextFloat()
-                    if (r < 0.06f) { lamp.state = 1; lamp.timer = 1.5f + m.rnd.nextFloat() * 2.5f }
-                    else if (r < 0.16f) { lamp.state = 2; lamp.timer = 0.3f + m.rnd.nextFloat() * 0.9f }
-                }
-            }
-            1 -> {
-                lamp.target = 0.12f
-                if (lamp.timer <= 0f) { lamp.state = 3; lamp.timer = 1.2f + m.rnd.nextFloat() }
-            }
-            2 -> {
-                lamp.chatter -= dt
-                if (lamp.chatter <= 0f) {
-                    lamp.chatter = 0.04f + m.rnd.nextFloat() * 0.12f
-                    lamp.target = if (m.rnd.nextBoolean()) 0.15f + m.rnd.nextFloat() * 0.3f else 1f
-                }
-                if (lamp.timer <= 0f) { lamp.state = 0; lamp.timer = 1f }
-            }
-            3 -> {
-                lamp.target = 1f
-                if (lamp.timer <= 0f) { lamp.state = 0; lamp.timer = 2f }
-            }
-        }
-        val rate = when (lamp.state) { 1 -> 0.9f; 2 -> 25f; else -> 2.5f }
-        lamp.bright += (lamp.target - lamp.bright) * min(1f, dt * rate)
-        // 消えかけの間は細かくジジッと揺れる
-        val buzz = if (lamp.state == 1) 0.85f + 0.15f * sin(t * 47f + i) * sin(t * 13f) else 0.97f + 0.03f * sin(t * 9f + i * 2f)
-        val b = (lamp.bright * buzz * music).coerceIn(0f, 1f)
-
-        val cx = size.width * (i + 0.5f) / count
-        val bulbY = size.height * 0.42f
-        val r = size.height * 0.11f
-        // コード
-        drawLine(Color(0xFF2A2420), Offset(cx, 0f), Offset(cx, bulbY - r * 1.1f), strokeWidth = 2f)
-        drawRect(Color(0xFF3A3028), Offset(cx - r * 0.45f, bulbY - r * 1.3f), Size(r * 0.9f, r * 0.5f))
-        // 光の広がり
-        val halo = size.height * (0.55f + 0.35f * b)
-        drawCircle(
-            Brush.radialGradient(listOf(Color(0xFFFFB04A).copy(alpha = 0.55f * b), Color(0x33FF8A2A).copy(alpha = 0.2f * b), Color.Transparent), center = Offset(cx, bulbY), radius = halo),
-            halo, Offset(cx, bulbY),
-        )
-        // 電球とフィラメント
-        drawCircle(Color(0xFF2B2018).copy(alpha = 1f - b * 0.6f), r, Offset(cx, bulbY))
-        drawCircle(lerp(Color(0xFF5A3A1A), Color(0xFFFFE2A8), b).copy(alpha = 0.35f + 0.65f * b), r * 0.92f, Offset(cx, bulbY))
-        drawLine(lerp(Color(0xFF6A3A10), Color.White, b), Offset(cx - r * 0.35f, bulbY), Offset(cx + r * 0.35f, bulbY), strokeWidth = 2.5f, cap = StrokeCap.Round)
-        // 床の照り返し
-        drawOval(
-            Brush.radialGradient(listOf(Color(0xFFFFB04A).copy(alpha = 0.35f * b), Color.Transparent), center = Offset(cx, size.height * 0.95f), radius = size.width / count * 0.5f),
-            Offset(cx - size.width / count * 0.5f, size.height * 0.85f),
-            Size(size.width / count, size.height * 0.2f),
-        )
     }
 }
 
@@ -1131,11 +1072,28 @@ private fun DrawScope.drawVfd(m: Meter) {
     }
     // 床の線と周波数表示
     drawLine(Color(0xFF4FB3FF).copy(alpha = 0.5f), Offset(cx - baseW / 2, floorY + 2f), Offset(cx + baseW / 2, floorY + 2f), strokeWidth = 1.5f)
-    val ts = min(labelH * 0.75f, baseW / n * 0.32f)
+    // 周波数表示は VFD 3D と同じドットフォントで、点の集まりとして描く
+    val dots = labels.map { dotLabel(it) }
+    val maxW = dots.maxOf { it.first }
+    val pitch = min(labelH * 0.9f / 11f, baseW / n * 0.9f / maxW)
+    val lit = ArrayList<Offset>()
     for (i in 0 until n) {
-        label(labels[i], colX(i, 0f, 0), floorY + 4f + ts, Color(0xFF7FE0FF).copy(alpha = 0.85f), ts, bold = false)
+        val (dw, bits) = dots[i]
+        val x0 = colX(i, 0f, 0) - dw * pitch / 2
+        val y0 = floorY + 6f - pitch * 1.5f // フォントの上の余白（1〜2段目）を詰める
+        for (r in 0 until DOT_ROWS) for (c in 0 until dw) {
+            if (bits[r * dw + c]) lit += Offset(x0 + c * pitch + pitch / 2, y0 + r * pitch + pitch / 2)
+        }
     }
+    val dotSize = pitch * 0.76f
+    drawPoints(lit, PointMode.Points, VfdCyan.copy(alpha = 0.3f), strokeWidth = dotSize * 1.6f, cap = StrokeCap.Round)
+    drawPoints(lit, PointMode.Points, VfdCyan.copy(alpha = 0.9f), strokeWidth = dotSize, cap = StrokeCap.Round)
 }
+
+/** 決まった文字（周波数表示など）のドットは一度作ったら使い回す */
+private val dotLabelCache = HashMap<String, Pair<Int, BooleanArray>>()
+private fun dotLabel(text: String): Pair<Int, BooleanArray> =
+    dotLabelCache.getOrPut(text) { trimDots(textToDots(text)) }
 
 // ---------------- VFDスペクトラム 3D（1層・低く横に広い台形＋昔のカーステ風の表示） ----------------
 

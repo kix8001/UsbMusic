@@ -57,7 +57,6 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     RETRO_LR_CENTER("retro_lr_center", "レトロLR センター", "中央から左（L）と右（R）へLEDが伸びます"),
     WAVE("wave", "レインボーウェーブ", "音の波が奥から手前へ流れる立体スペクトラム"),
     CIRCLE("circle", "サークル", "円形に広がるスペクトラムと波形"),
-    WARP("warp", "ワープ", "なめらかにうねりながら突き進む、光のトンネル"),
     LIGHTS("lights", "イルミネーション", "色が流れる電球が音に合わせて点灯します"),
     RIPPLE("ripple", "波紋", "しずくが落ちて波紋が広がり、重なって消えていきます"),
     RIPPLE_TOP("ripple_top", "カラー波紋", "真上から見た水面に、色とりどりの波紋が広がります"),
@@ -146,11 +145,7 @@ private class Meter {
         return out
     }
 
-    // ライトリボン・ワープで使う動きの状態
-
-    class Streak(var angle: Float, var z: Float, var len: Float, var hue: Float)
-    val streaks = ArrayList<Streak>()
-
+    // 波紋で使う動きの状態
     class Ripple(val x: Float, val y: Float, val maxR: Float, val life: Float, val hue: Float, var age: Float = 0f)
     val ripples = ArrayList<Ripple>()
 
@@ -160,17 +155,11 @@ private class Meter {
     val cool = FloatArray(8)
     var idle = 0f
 
-    // ワープ
-    var warpSpeed = 1f
-    var warpSpin = 0f
-    val rings = ArrayList<Float>()
-
     // VFDスペクトラムの残像
     val vfdHistory = ArrayDeque<FloatArray>()
     var vfdTimer = 0f
     val vfd3dHistory = ArrayDeque<FloatArray>()
     var vfd3dTimer = 0f
-    var tunnelZ = 0f
 
     // VFD 3D：表示の幅を曲の音量に合わせる基準と、ドット文字の横スクロール
     var vfdRef = 0.6f
@@ -248,13 +237,12 @@ fun Visualizer(
                 VisStyle.RETRO -> drawRetro(meter)
                 VisStyle.RETRO_LR_CENTER -> drawRetroLRCenter(meter)
                 VisStyle.VU -> drawVu(meter, t, currentTitle, currentArtist)
-                VisStyle.VFD -> drawVfd(meter)
+                VisStyle.VFD -> drawVfd(meter, currentCaption, currentTime())
                 VisStyle.VFD3D -> drawVfd3d(meter, currentCaption, currentTime())
                 VisStyle.RIPPLE -> drawRipple(meter, t)
                 VisStyle.RIPPLE_TOP -> drawRippleTop(meter, t)
                 VisStyle.WAVE -> drawWave(meter)
                 VisStyle.CIRCLE -> drawCircleVis(meter, t)
-                VisStyle.WARP -> drawWarp(meter, t)
                 VisStyle.LIGHTS -> drawLights(meter, t)
                 VisStyle.OFF -> Unit
             }
@@ -450,109 +438,6 @@ private fun DrawScope.drawCircleVis(m: Meter, t: Float) {
         if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
     }
     drawPath(path, Color.White.copy(alpha = 0.9f), style = Stroke(width = 2f))
-}
-
-// ---------------- ワープ（うねりながら突き進む光のトンネル） ----------------
-
-private fun DrawScope.drawWarp(m: Meter, t: Float) {
-    drawRect(Color.Black)
-    // 速度：音が大きいほど・低音が鳴るほど加速
-    // 速く・激しく：ビートで急加速し、トンネル全体が大きく回転・蛇行する
-    // なめらかに：速さの変化はゆっくり追従させる
-    val target = 1.4f + m.energy * 6f + m.bass * 4f
-    m.warpSpeed += (target - m.warpSpeed) * min(1f, m.dt * (if (target > m.warpSpeed) 2.5f else 0.8f))
-    m.tunnelZ += m.dt * m.warpSpeed * 0.7f
-    m.warpSpin += m.dt * (0.25f + m.energy * 0.6f)
-    val travel = m.tunnelZ
-    val sx = (size.width / size.height * 0.65f).coerceAtLeast(1f)
-    // トンネルの中心線がうねる（奥ほど大きくずれる）
-    fun bend(z: Float): Offset {
-        val w = travel + z
-        return Offset(size.width * 0.36f * sin(w * 0.9f + t * 0.35f), size.height * 0.4f * cos(w * 0.75f + t * 0.28f))
-    }
-    val near0 = bend(0.3f)
-    // 画面全体のロール（左右に大きく傾く）と、低音での揺れ
-    val roll = sin(t * 0.25f) * 0.35f
-    val cr = cos(roll)
-    val srl = sin(roll)
-    val shakeX = 0f
-    val shakeY = 0f
-    fun proj(z: Float, ox: Float, oy: Float): Offset {
-        val b = bend(z)
-        val x = ((b.x - near0.x) + ox * sx) / z * 0.9f
-        val y = ((b.y - near0.y) + oy) / z * 0.9f
-        return Offset(size.width / 2 + x * cr - y * srl + shakeX, size.height / 2 + x * srl + y * cr + shakeY)
-    }
-    val spacing = 0.18f
-    val count = 24
-    val phase = (travel / spacing) % 1f
-    // 奥から手前へ輪を描く
-    for (k in count - 1 downTo 0) {
-        val z = 0.32f + (k + 1 - phase) * spacing
-        val near = (1f - z / 4.3f).coerceIn(0f, 1f)
-        val hue = ((t * 35f + (travel + z) * 80f) % 360f + 360f) % 360f
-        val c = Color.hsv(hue, 0.75f, 1f)
-        val r = size.height * 0.42f
-        val center = proj(z, 0f, 0f)
-        val rx = r * sx / z * 0.9f
-        val ry = r / z * 0.9f
-        if (rx > size.width * 2.5f) continue
-        // 輪を区切って、回転するパネルのように見せる
-        val segs = 16
-        for (i in 0 until segs) {
-            if ((i + (m.warpSpin * 2).toInt()) % 4 == 3) continue
-            val a1 = (i.toFloat() / segs) * 2 * PI.toFloat() + m.warpSpin
-            val a2 = a1 + 2 * PI.toFloat() / segs * 0.8f
-            drawLine(
-                c.copy(alpha = near * (0.5f + 0.5f * m.energy.coerceAtMost(1f))),
-                Offset(center.x + cos(a1) * rx, center.y + sin(a1) * ry),
-                Offset(center.x + cos(a2) * rx, center.y + sin(a2) * ry),
-                strokeWidth = 1f + near * 5f,
-                cap = StrokeCap.Round,
-            )
-        }
-    }
-    // 壁に沿って流れる光の筋
-    if (m.streaks.isEmpty()) repeat(120) {
-        m.streaks += Meter.Streak(m.rnd.nextFloat() * 6.283f, 0.3f + m.rnd.nextFloat() * 4f, 0.1f + m.rnd.nextFloat() * 0.3f, m.rnd.nextFloat())
-    }
-    // 光の筋は壁面（輪の半径のすぐ内側）に貼りつき、奥行きに沿って壁の上を
-    // 螺旋状に蛇行する。筋を何点かに区切って描くので、トンネルの曲がりにも沿って曲がる
-    val rr = size.height * 0.4f
-    val wallPts = 10
-    val pts = arrayOfNulls<Offset>(wallPts + 1)
-    for (s in m.streaks) {
-        s.z -= m.dt * m.warpSpeed * 0.7f
-        if (s.z <= 0.32f) {
-            s.z = 4.3f
-            s.angle = m.rnd.nextFloat() * 6.283f
-            s.hue = m.rnd.nextFloat()
-        }
-        val len = s.len * (0.9f + m.warpSpeed * 0.45f)
-        for (j in 0..wallPts) {
-            val z = s.z + len * j / wallPts
-            val w = travel + z
-            // 壁の上でのうねり：ゆっくりした螺旋＋筋ごとに位相の違う蛇行
-            val a = s.angle + m.warpSpin * 0.3f + w * 0.55f + sin(w * 2.1f + s.hue * 6.283f + t * 0.8f) * 0.45f
-            val wr = rr * (0.97f + 0.03f * sin(w * 3f + s.hue * 10f))
-            pts[j] = proj(z, cos(a) * wr, sin(a) * wr)
-        }
-        val near = (1f - s.z / 4.3f).coerceIn(0f, 1f)
-        val tint = Color.hsv(((t * 35f + (travel + s.z) * 80f) % 360f + 360f) % 360f, 0.55f, 1f)
-        for (j in 0 until wallPts) {
-            // 先頭（手前）ほど明るく太い光にし、尾は細く消えていく
-            val k = 1f - j / wallPts.toFloat()
-            val p1 = pts[j]!!
-            val p2 = pts[j + 1]!!
-            drawLine(tint.copy(alpha = near * 0.35f * k), p1, p2, strokeWidth = (1f + near * 2.5f) * 2.6f * k + 1f, cap = StrokeCap.Round)
-            drawLine(Color.White.copy(alpha = near * 0.85f * k), p1, p2, strokeWidth = (1f + near * 2.5f) * k + 0.5f, cap = StrokeCap.Round)
-        }
-    }
-    // 出口の光
-    val far = proj(0.32f + count * spacing, 0f, 0f)
-    val glow = size.height * (0.15f + 0.35f * m.energy)
-    drawCircle(Brush.radialGradient(listOf(Color(0xCCFFFFFF), Color.Transparent), center = far, radius = glow), glow, far)
-    if (m.bass > 0.65f) drawRect(Color.White.copy(alpha = ((m.bass - 0.65f) * 0.25f).coerceAtMost(0.08f)))
 }
 
 // ---------------- イルミネーション ----------------
@@ -890,36 +775,24 @@ private fun DrawScope.drawAmpDisplay(x: Float, y: Float, w: Float, h: Float, t: 
             val p = ampPaint
             p.typeface = DotFont.typeface ?: Typeface.MONOSPACE
             p.textAlign = Paint.Align.LEFT
-            fun line(text: String, size: Float, baseY: Float, alpha: Float, spacing: Float) {
-                if (text.isBlank()) return
-                p.textSize = size
-                p.letterSpacing = spacing
-                p.color = AmpGlow.copy(alpha = alpha).toArgb()
-                p.setShadowLayer(size * 0.35f, 0f, 0f, AmpGlow.copy(alpha = 0.8f * alpha).toArgb())
-                val textW = p.measureText(text)
-                if (textW <= tw) {
-                    nc.drawText(text, tx + (tw - textW) / 2, baseY, p)
-                } else {
-                    // 入りきらないときは、少し止まってから右から左へ流す
-                    val space = size * 3f
-                    val loop = textW + space
-                    val speed = size * 2.2f
-                    val pause = 2f
-                    val period = loop / speed + pause
-                    val ph = (t % period)
-                    val off = if (ph < pause) 0f else (ph - pause) * speed
-                    nc.drawText(text, tx - off, baseY, p)
-                    nc.drawText(text, tx - off + loop, baseY, p)
-                }
-            }
-            val artistSize = gh * 0.28f
-            val titleSize = gh * 0.38f
-            if (artist.isNotBlank() && title.isNotBlank()) {
-                line(artist.uppercase(), artistSize, gy + gh * 0.40f, 0.75f, 0.12f)
-                line(title, titleSize, gy + gh * 0.84f, 1f, 0.06f)
-            } else {
-                line(title.ifBlank { artist }, titleSize, gy + gh * 0.64f, 1f, 0.06f)
-            }
+            // アーティスト名と曲名を1行にまとめる。ふだんは止めておき、
+            // ときどき左へ流れ去って右から戻ってくる（入りきらない名前もこのとき全部読める）
+            val text = listOf(artist.uppercase(), title).filter { it.isNotBlank() }.joinToString("  ―  ")
+            val sz = gh * 0.5f
+            p.textSize = sz
+            p.letterSpacing = 0.08f
+            p.color = AmpGlow.toArgb()
+            p.setShadowLayer(sz * 0.35f, 0f, 0f, AmpGlow.copy(alpha = 0.8f).toArgb())
+            val textW = p.measureText(text)
+            val home = if (textW <= tw) tx + (tw - textW) / 2 else tx // 入るなら中央、入らなければ左寄せ
+            val hold = if (textW <= tw) 12f else 6f
+            val speed = sz * 2.4f
+            val outDist = home - tx + textW // 左へ完全に消えるまで
+            val inDist = tx + tw - home     // 右端から元の位置へ戻るまで
+            val period = hold + (outDist + inDist) / speed
+            val d = ((t % period) - hold).coerceAtLeast(0f) * speed
+            val x = if (d <= outDist) home - d else tx + tw - (d - outDist)
+            nc.drawText(text, x, gy + gh * 0.68f, p)
             p.clearShadowLayer()
             p.letterSpacing = 0f
         }
@@ -1022,8 +895,10 @@ private val VfdRows = listOf(
     Color(0xFF6CFF7A), Color(0xFFB5FF4A), Color(0xFFFFD84A), Color(0xFFFF8A3A), Color(0xFFFF3B30), Color(0xFFFF3B30),
 )
 
-private fun DrawScope.drawVfd(m: Meter) {
+private fun DrawScope.drawVfd(m: Meter, caption: String, time: String) {
     drawRect(Color(0xFF050608))
+    // 上段は VFD 3D と同じドット文字の曲名・再生時間
+    val headerBottom = drawDotHeader(m, caption, time)
     val n = 10
     val segs = VfdRows.size
     val labels = listOf("63", "125", "250", "500", "1k", "2k", "3.5k", "6k", "10k", "16k")
@@ -1036,7 +911,7 @@ private fun DrawScope.drawVfd(m: Meter) {
     }
     val labelH = size.height * 0.14f
     val floorY = size.height - labelH - 4f
-    val topY = size.height * 0.06f
+    val topY = headerBottom + size.height * 0.04f
     val h = floorY - topY
     val cx = size.width / 2
     val baseW = size.width * 0.8f
@@ -1163,12 +1038,13 @@ private fun DrawScope.slantLabel(main: String, unit: String, x: Float, y: Float,
     }
 }
 
-private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
-    drawRect(Color(0xFF050608))
+/**
+ * VFD の上段：ドット文字（曲名 / アーティスト）を水色、再生時間を琥珀色で出す。
+ * 入りきらない曲名は横に流す。戻り値は上段の下端の y 座標
+ */
+private fun DrawScope.drawDotHeader(m: Meter, caption: String, time: String): Float {
     val w = size.width
     val h = size.height
-
-    // ---- 上段：ドット文字（曲名 / アーティスト）と再生時間 ----
     // スマホ表示（縦長・幅が狭い）では、ドット文字を2/3の大きさにする
     val phoneMode = w / density < 600f
     val pitch = h * 0.2f / DOT_ROWS * (if (phoneMode) 2f / 3f else 1f)
@@ -1255,6 +1131,15 @@ private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
     }
     drawPoints(tl, PointMode.Points, VfdAmber.copy(alpha = 0.3f), strokeWidth = dotSize * 1.6f, cap = StrokeCap.Round)
     drawPoints(tl, PointMode.Points, VfdAmber, strokeWidth = dotSize, cap = StrokeCap.Round)
+    return dotY + DOT_ROWS * pitch
+}
+
+private fun DrawScope.drawVfd3d(m: Meter, caption: String, time: String) {
+    drawRect(Color(0xFF050608))
+    val w = size.width
+    val h = size.height
+
+    drawDotHeader(m, caption, time)
     // ---- スペクトラム（台形） ----
     val n = 14
     val segs = VfdRows.size

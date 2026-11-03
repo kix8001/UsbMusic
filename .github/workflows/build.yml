@@ -1,8 +1,8 @@
 name: Build APK
 
 on:
-      branches: [ '**' ]
-    branches: [ main ]
+ push:
+    branches: [ '**' ]
   workflow_dispatch:
 
 jobs:

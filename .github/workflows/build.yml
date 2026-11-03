@@ -1,10 +1,9 @@
 name: Build APK
 
 on:
- push:
+  push:
     branches: [ '**' ]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest

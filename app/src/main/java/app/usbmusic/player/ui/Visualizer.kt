@@ -202,11 +202,15 @@ fun Visualizer(
     onTap: (() -> Unit)? = null,
     caption: String = "",
     timeText: () -> String = { "" },
+    title: String = "",
+    artist: String = "",
 ) {
     if (style == VisStyle.OFF) return
     DotFont.init(androidx.compose.ui.platform.LocalContext.current)
     val currentCaption by rememberUpdatedState(caption)
     val currentTime by rememberUpdatedState(timeText)
+    val currentTitle by rememberUpdatedState(title)
+    val currentArtist by rememberUpdatedState(artist)
     val meter = remember { Meter() }
     var frame by remember { mutableLongStateOf(0L) }
     val isPlaying by rememberUpdatedState(playing)
@@ -247,7 +251,7 @@ fun Visualizer(
                 VisStyle.BLOCKS -> drawBlocks(meter)
                 VisStyle.RETRO -> drawRetro(meter)
                 VisStyle.RETRO_LR_CENTER -> drawRetroLRCenter(meter)
-                VisStyle.VU -> drawVu(meter)
+                VisStyle.VU -> drawVu(meter, t, currentTitle, currentArtist)
                 VisStyle.VFD -> drawVfd(meter)
                 VisStyle.VFD3D -> drawVfd3d(meter, currentCaption, currentTime())
                 VisStyle.RIPPLE -> drawRipple(meter, t)
@@ -877,7 +881,7 @@ private fun vuPos(vu: Float): Float {
     return ((10f.pow(vu.coerceIn(VU_MIN, VU_MAX) / 20f) - lo) / (hi - lo)).coerceIn(0f, 1f)
 }
 
-private fun DrawScope.drawVu(m: Meter) {
+private fun DrawScope.drawVu(m: Meter, t: Float, title: String, artist: String) {
     drawRect(Color(0xFF1A1714))
     // 針の動き：VUメーターらしく少しオーバーシュートして戻る
     for (c in 0..1) {
@@ -889,16 +893,101 @@ private fun DrawScope.drawVu(m: Meter) {
     }
     val gap = size.width * 0.025f
     val areaW = (size.width - gap * 3) / 2
-    val areaH = size.height - 8f
+    // 上部にレトロアンプ風の表示窓（曲名・アーティスト名）。表示欄が低すぎるときは出さない
+    val hasInfo = title.isNotBlank() || artist.isNotBlank()
+    val dispH = if (hasInfo && size.height >= 160f) min(size.height * 0.24f, size.width * 0.075f) else 0f
+    val top = if (dispH > 0f) gap * 0.5f + dispH else 0f
+    if (dispH > 0f) drawAmpDisplay(gap, gap * 0.5f, size.width - gap * 2, dispH, t, title, artist)
+    val areaH = size.height - top - 8f
     // 文字盤の縦横比を固定（横:縦 = 1.9:1）して、表示欄の形に関係なく崩れないようにする
     val faceH = min(areaH, areaW / 1.9f)
     val faceW = faceH * 1.9f
     for (c in 0..1) {
         val ax = gap + c * (areaW + gap)
         val x = ax + (areaW - faceW) / 2
-        val y = (size.height - faceH) / 2
+        val y = top + (size.height - top - faceH) / 2
         drawVuMeter(x, y, faceW, faceH, m.needle[c], if (c == 0) "L" else "R")
     }
+}
+
+private val AmpGlow = Color(0xFFFFB347)
+private val ampPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+/**
+ * 昔のアンプ／チューナーの表示窓。ヘアライン仕上げの金属枠に、黒いスモークガラス越しの
+ * 琥珀色に光る文字で、上段にアーティスト名、下段に曲名を出す。入りきらない文字は横に流す
+ */
+private fun DrawScope.drawAmpDisplay(x: Float, y: Float, w: Float, h: Float, t: Float, title: String, artist: String) {
+    val r = h * 0.12f
+    // 金属の枠（ヘアライン）
+    drawRoundRect(
+        Brush.verticalGradient(listOf(Color(0xFF8A8580), Color(0xFF4A4642), Color(0xFF2A2724)), startY = y, endY = y + h),
+        Offset(x, y), Size(w, h), androidx.compose.ui.geometry.CornerRadius(r, r),
+    )
+    val bez = h * 0.07f
+    val gx = x + bez
+    val gy = y + bez
+    val gw = w - bez * 2
+    val gh = h - bez * 2
+    // スモークガラス
+    drawRoundRect(
+        Brush.verticalGradient(listOf(Color(0xFF0C0806), Color(0xFF17100A), Color(0xFF0C0806)), startY = gy, endY = gy + gh),
+        Offset(gx, gy), Size(gw, gh), androidx.compose.ui.geometry.CornerRadius(r * 0.6f, r * 0.6f),
+    )
+    // 左右の飾り（小さなパイロットランプ）
+    val lampR = gh * 0.07f
+    for (lx in listOf(gx + gh * 0.28f, gx + gw - gh * 0.28f)) {
+        val c = Offset(lx, gy + gh / 2)
+        drawCircle(Brush.radialGradient(listOf(AmpGlow.copy(alpha = 0.45f), Color.Transparent), center = c, radius = lampR * 3f), lampR * 3f, c)
+        drawCircle(AmpGlow, lampR, c)
+    }
+    val tx = gx + gh * 0.6f
+    val tw = gw - gh * 1.2f
+    clipRect(tx, gy, tx + tw, gy + gh) {
+        drawIntoCanvas { cv ->
+            val nc = cv.nativeCanvas
+            val p = ampPaint
+            p.typeface = DotFont.typeface ?: Typeface.MONOSPACE
+            p.textAlign = Paint.Align.LEFT
+            fun line(text: String, size: Float, baseY: Float, alpha: Float, spacing: Float) {
+                if (text.isBlank()) return
+                p.textSize = size
+                p.letterSpacing = spacing
+                p.color = AmpGlow.copy(alpha = alpha).toArgb()
+                p.setShadowLayer(size * 0.35f, 0f, 0f, AmpGlow.copy(alpha = 0.8f * alpha).toArgb())
+                val textW = p.measureText(text)
+                if (textW <= tw) {
+                    nc.drawText(text, tx + (tw - textW) / 2, baseY, p)
+                } else {
+                    // 入りきらないときは、少し止まってから右から左へ流す
+                    val space = size * 3f
+                    val loop = textW + space
+                    val speed = size * 2.2f
+                    val pause = 2f
+                    val period = loop / speed + pause
+                    val ph = (t % period)
+                    val off = if (ph < pause) 0f else (ph - pause) * speed
+                    nc.drawText(text, tx - off, baseY, p)
+                    nc.drawText(text, tx - off + loop, baseY, p)
+                }
+            }
+            val artistSize = gh * 0.28f
+            val titleSize = gh * 0.38f
+            if (artist.isNotBlank() && title.isNotBlank()) {
+                line(artist.uppercase(), artistSize, gy + gh * 0.40f, 0.75f, 0.12f)
+                line(title, titleSize, gy + gh * 0.84f, 1f, 0.06f)
+            } else {
+                line(title.ifBlank { artist }, titleSize, gy + gh * 0.64f, 1f, 0.06f)
+            }
+            p.clearShadowLayer()
+            p.letterSpacing = 0f
+        }
+    }
+    // ガラスの映り込み（上半分にうっすら）
+    drawRoundRect(
+        Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.02f), Color.Transparent), startY = gy, endY = gy + gh * 0.55f),
+        Offset(gx, gy), Size(gw, gh * 0.5f), androidx.compose.ui.geometry.CornerRadius(r * 0.6f, r * 0.6f),
+    )
 }
 
 private fun DrawScope.drawVuMeter(x: Float, y: Float, w: Float, h: Float, pos: Float, ch: String) {

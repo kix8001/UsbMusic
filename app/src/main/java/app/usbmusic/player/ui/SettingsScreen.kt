@@ -120,7 +120,7 @@ fun SettingsScreen(vm: MainViewModel, onPickFolder: () -> Unit) {
         ActionRow("アルバムアートを読み込み直す") { vm.clearArtCache() }
 
         SectionHeader("このアプリについて")
-        InfoRow("mTunes 0.7.4")
+        InfoRow("mTunes ${app.usbmusic.player.BuildConfig.VERSION_NAME}")
         InfoRow("MAKOTO MORITA MADE")
     }
 }

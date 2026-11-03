@@ -251,7 +251,7 @@ fun Visualizer(
                 VisStyle.BLOCKS -> drawBlocks(meter)
                 VisStyle.RETRO -> drawRetro(meter)
                 VisStyle.RETRO_LR_CENTER -> drawRetroLRCenter(meter)
-                VisStyle.VU -> drawVu(meter, t, currentTitle, currentArtist)
+                VisStyle.VU -> drawVu(meter, frame, currentTitle, currentArtist)
                 VisStyle.VFD -> drawVfd(meter)
                 VisStyle.VFD3D -> drawVfd3d(meter, currentCaption, currentTime())
                 VisStyle.RIPPLE -> drawRipple(meter, t)
@@ -881,7 +881,7 @@ private fun vuPos(vu: Float): Float {
     return ((10f.pow(vu.coerceIn(VU_MIN, VU_MAX) / 20f) - lo) / (hi - lo)).coerceIn(0f, 1f)
 }
 
-private fun DrawScope.drawVu(m: Meter, t: Float, title: String, artist: String) {
+private fun DrawScope.drawVu(m: Meter, nanos: Long, title: String, artist: String) {
     drawRect(Color(0xFF1A1714))
     // 針の動き：VUメーターらしく少しオーバーシュートして戻る
     for (c in 0..1) {
@@ -897,7 +897,7 @@ private fun DrawScope.drawVu(m: Meter, t: Float, title: String, artist: String) 
     val hasInfo = title.isNotBlank() || artist.isNotBlank()
     val dispH = if (hasInfo && size.height >= 160f) min(size.height * 0.24f, size.width * 0.075f) else 0f
     val top = if (dispH > 0f) gap * 0.5f + dispH else 0f
-    if (dispH > 0f) drawAmpDisplay(gap, gap * 0.5f, size.width - gap * 2, dispH, t, title, artist)
+    if (dispH > 0f) drawAmpDisplay(gap, gap * 0.5f, size.width - gap * 2, dispH, nanos, title, artist)
     val areaH = size.height - top - 8f
     // 文字盤の縦横比を固定（横:縦 = 1.9:1）して、表示欄の形に関係なく崩れないようにする
     val faceH = min(areaH, areaW / 1.9f)
@@ -913,11 +913,42 @@ private fun DrawScope.drawVu(m: Meter, t: Float, title: String, artist: String) 
 private val AmpGlow = Color(0xFFFFB347)
 private val ampPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
+/** 表示窓の流れる文字：文字が変わったら、先頭が左端に止まった状態からやり直す */
+private object AmpScroll {
+    var text = ""
+    var startNanos = 0L
+}
+
+/** 0〜1 の擬似乱数（同じ n には同じ値） */
+private fun hash01(n: Long): Float {
+    var x = n * -0x61c8864680b583ebL
+    x = x xor (x ushr 29)
+    x *= -0x4b47d5b1c6c0f0e5L
+    x = x xor (x ushr 32)
+    return ((x ushr 40).toFloat() / (1L shl 24).toFloat())
+}
+
+/**
+ * バックライトの明るさ（1 付近）。電源の細かいゆらぎに、ときどき「チチッ」と暗くなる瞬きを混ぜる
+ */
+private fun ampBacklight(sec: Float): Float {
+    val fine = (hash01((sec * 30f).toLong()) - 0.5f) * 0.05f
+    val hum = sin(sec * 2f * PI.toFloat() * 0.7f) * 0.015f
+    // 約0.25秒ごとにくじを引き、まれに短く暗くなる
+    val slot = (sec * 4f).toLong()
+    val dip = if (hash01(slot + 7777L) > 0.965f) {
+        val ph = sec * 4f - slot
+        if (ph < 0.35f) 0.25f + 0.2f * hash01((sec * 60f).toLong()) else 0f
+    } else 0f
+    return (0.96f + fine + hum - dip).coerceIn(0.5f, 1f)
+}
+
 /**
  * 昔のアンプ／チューナーの表示窓。ヘアライン仕上げの金属枠に、黒いスモークガラス越しの
- * 琥珀色に光る文字で、上段にアーティスト名、下段に曲名を出す。入りきらない文字は横に流す
+ * 琥珀色に光る文字で「曲名 / アーティスト名」を1行に出し、右から左へ流す（先頭が左端に来たら少し止まる）。
+ * バックライトにはわずかなちらつきを入れる
  */
-private fun DrawScope.drawAmpDisplay(x: Float, y: Float, w: Float, h: Float, t: Float, title: String, artist: String) {
+private fun DrawScope.drawAmpDisplay(x: Float, y: Float, w: Float, h: Float, nanos: Long, title: String, artist: String) {
     val r = h * 0.12f
     // 金属の枠（ヘアライン）
     drawRoundRect(
@@ -934,51 +965,54 @@ private fun DrawScope.drawAmpDisplay(x: Float, y: Float, w: Float, h: Float, t: 
         Brush.verticalGradient(listOf(Color(0xFF0C0806), Color(0xFF17100A), Color(0xFF0C0806)), startY = gy, endY = gy + gh),
         Offset(gx, gy), Size(gw, gh), androidx.compose.ui.geometry.CornerRadius(r * 0.6f, r * 0.6f),
     )
+
+    val text = listOf(title, artist).filter { it.isNotBlank() }.joinToString("  /  ")
+    if (text != AmpScroll.text) {
+        AmpScroll.text = text
+        AmpScroll.startNanos = nanos
+    }
+    val sec = ((nanos - AmpScroll.startNanos).coerceAtLeast(0L) / 1_000_000L) / 1000f
+    val light = ampBacklight(((nanos / 1_000_000L) % 3_600_000L) / 1000f)
+
+    // ガラスの奥のバックライトのにじみ
+    drawRoundRect(
+        Brush.radialGradient(
+            listOf(AmpGlow.copy(alpha = 0.10f * light), AmpGlow.copy(alpha = 0.03f * light), Color.Transparent),
+            center = Offset(gx + gw / 2, gy + gh / 2), radius = gw * 0.55f,
+        ),
+        Offset(gx, gy), Size(gw, gh), androidx.compose.ui.geometry.CornerRadius(r * 0.6f, r * 0.6f),
+    )
     // 左右の飾り（小さなパイロットランプ）
     val lampR = gh * 0.07f
     for (lx in listOf(gx + gh * 0.28f, gx + gw - gh * 0.28f)) {
         val c = Offset(lx, gy + gh / 2)
-        drawCircle(Brush.radialGradient(listOf(AmpGlow.copy(alpha = 0.45f), Color.Transparent), center = c, radius = lampR * 3f), lampR * 3f, c)
-        drawCircle(AmpGlow, lampR, c)
+        drawCircle(Brush.radialGradient(listOf(AmpGlow.copy(alpha = 0.45f * light), Color.Transparent), center = c, radius = lampR * 3f), lampR * 3f, c)
+        drawCircle(AmpGlow.copy(alpha = light), lampR, c)
     }
     val tx = gx + gh * 0.6f
     val tw = gw - gh * 1.2f
-    clipRect(tx, gy, tx + tw, gy + gh) {
+    if (text.isNotEmpty()) clipRect(tx, gy, tx + tw, gy + gh) {
         drawIntoCanvas { cv ->
             val nc = cv.nativeCanvas
             val p = ampPaint
             p.typeface = DotFont.typeface ?: Typeface.MONOSPACE
             p.textAlign = Paint.Align.LEFT
-            fun line(text: String, size: Float, baseY: Float, alpha: Float, spacing: Float) {
-                if (text.isBlank()) return
-                p.textSize = size
-                p.letterSpacing = spacing
-                p.color = AmpGlow.copy(alpha = alpha).toArgb()
-                p.setShadowLayer(size * 0.35f, 0f, 0f, AmpGlow.copy(alpha = 0.8f * alpha).toArgb())
-                val textW = p.measureText(text)
-                if (textW <= tw) {
-                    nc.drawText(text, tx + (tw - textW) / 2, baseY, p)
-                } else {
-                    // 入りきらないときは、少し止まってから右から左へ流す
-                    val space = size * 3f
-                    val loop = textW + space
-                    val speed = size * 2.2f
-                    val pause = 2f
-                    val period = loop / speed + pause
-                    val ph = (t % period)
-                    val off = if (ph < pause) 0f else (ph - pause) * speed
-                    nc.drawText(text, tx - off, baseY, p)
-                    nc.drawText(text, tx - off + loop, baseY, p)
-                }
-            }
-            val artistSize = gh * 0.28f
-            val titleSize = gh * 0.38f
-            if (artist.isNotBlank() && title.isNotBlank()) {
-                line(artist.uppercase(), artistSize, gy + gh * 0.40f, 0.75f, 0.12f)
-                line(title, titleSize, gy + gh * 0.84f, 1f, 0.06f)
-            } else {
-                line(title.ifBlank { artist }, titleSize, gy + gh * 0.64f, 1f, 0.06f)
-            }
+            val size = gh * 0.42f
+            p.textSize = size
+            p.letterSpacing = 0.08f
+            p.color = AmpGlow.copy(alpha = light).toArgb()
+            p.setShadowLayer(size * 0.35f, 0f, 0f, AmpGlow.copy(alpha = 0.8f * light).toArgb())
+            val baseY = gy + gh / 2 - (p.ascent() + p.descent()) / 2
+            // 右から左へ流し続け、先頭が左端に来たら少し止まる。短い文字でも窓の幅ぶん流す
+            val textW = p.measureText(text)
+            val loop = max(textW + size * 4f, tw)
+            val speed = size * 2.2f
+            val pause = 2.5f
+            val period = loop / speed + pause
+            val ph = sec % period
+            val off = if (ph < pause) 0f else (ph - pause) * speed
+            nc.drawText(text, tx - off, baseY, p)
+            nc.drawText(text, tx - off + loop, baseY, p)
             p.clearShadowLayer()
             p.letterSpacing = 0f
         }

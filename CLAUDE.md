@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## ビルドとリリースの流れ
 
-- **このMacにはビルド環境が無い。`./gradlew` などでローカルビルドを試みないこと。** APKのビルドは GitHub Actions（`.github/workflows/build.yml`）で行う。main への push で `assembleRelease` が走り、APKにFFmpegの .so が入っているか確認したうえで、APK を `UsbMusic-apk` アーティファクトとして上げる。
+- **このMacにはビルド環境が無い。`./gradlew` などでローカルビルドを試みないこと。** APKのビルドは GitHub Actions（`.github/workflows/build.yml`）で行う。どのブランチへの push でも `assembleRelease` が走り、APKにFFmpegの .so が入っているか確認したうえで、APK を `UsbMusic-apk` アーティファクトとして上げる。
 - **修正したら commit して push し、Actions のビルド結果（成功／失敗）まで確認する。** 例：`gh run list --limit 1` で実行を探し、`gh run watch <id> --exit-status` で完了を待つ。失敗したら `gh run view <id> --log-failed` で原因を見て直す（Kotlinのエラーは `e: ` で始まる行）。
 - テストは無い（`src/test` も `src/androidTest` も無い）。動作確認はユーザーがナビ実機で行う。
 - リリースのたびに `app/build.gradle.kts` の `versionCode` / `versionName` を上げる。コミットメッセージは「mTunes 0.x.y: 変更点…」の形式。

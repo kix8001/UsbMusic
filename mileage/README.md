@@ -13,8 +13,16 @@
 
 ## ビルド
 GitHub Actions で行う（`mileage/` 以下を変えて push すると走る）。
-- Android：`.github/workflows/mileage-android.yml` → アーティファクト `Mileage-android-apk`
-- iOS：`.github/workflows/mileage-ios.yml` → アーティファクト `Mileage-ios-unsigned-ipa`（署名なし）。
+
+**最初に1回だけ**：ワークフローのファイルを `.github/workflows/` に移す（Claude の環境からは権限の都合で置けなかったため）。
+```
+git mv mileage/workflows/mileage-android.yml mileage/workflows/mileage-ios.yml .github/workflows/
+git apply mileage/workflows/build.yml.patch   # 任意：mileage/ だけの変更で mTunes をビルドしないようにする
+git commit -m "走行距離ログのワークフローを有効化" && git push
+```
+
+- Android：`mileage-android.yml` → アーティファクト `Mileage-android-apk`
+- iOS：`mileage-ios.yml` → アーティファクト `Mileage-ios-unsigned-ipa`（署名なし）。
   Xcode プロジェクトは `ios/project.yml` から XcodeGen で生成する。
 
 ## iPhone へのインストール

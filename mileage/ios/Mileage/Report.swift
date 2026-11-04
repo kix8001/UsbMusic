@@ -89,7 +89,7 @@ struct MonthReport {
         let dayF = DateFormatter(); dayF.locale = Locale(identifier: "ja_JP"); dayF.dateFormat = "M/d(E)"
         let timeF = DateFormatter(); timeF.locale = Locale(identifier: "ja_JP"); timeF.dateFormat = "H:mm"
         let nf = NumberFormatter(); nf.numberStyle = .decimal
-        func yen(_ v: Int) -> String { nf.string(from: NSNumber(value: v)) ?? String(v) }
+        func yenText(_ v: Int) -> String { nf.string(from: NSNumber(value: v)) ?? String(v) }
 
         // 列：日付 / 時刻 / 区分 / 出発地→到着地 / 行き先・用件 / 距離 / 金額
         let xDate = left, xTime = left + 50, xCat = left + 105, xRoute = left + 135
@@ -157,7 +157,7 @@ struct MonthReport {
                 draw(t.destination, xDest, y, text, width: xKmR - 50 - xDest)
                 draw(t.purpose, xDest, y + 10, text, width: xKmR - 50 - xDest)
                 drawRight(String(format: "%.1f", t.reportKm), xKmR, y, text)
-                drawRight(yen(tripAmount(t)), xAmtR, y, text)
+                drawRight(yenText(tripAmount(t)), xAmtR, y, text)
                 y += rowH - 10; hline(y); y += 10
             }
 
@@ -178,14 +178,14 @@ struct MonthReport {
                 drawRight(String(count(c)), xs[1] + 30, y, sum)
                 drawRight(String(format: "%.1f", km(c)), xs[2] + 50, y, sum)
                 drawRight(MonthReport.fmtRate(settings.rate(c)), xs[3] + 60, y, sum)
-                drawRight(yen(amount(c)), right, y, sum)
+                drawRight(yenText(amount(c)), right, y, sum)
                 y += 18
             }
             hline(y - 12)
             y += 4
             draw("合計", xs[0], y, sumB)
             drawRight(String(format: "%.1f", km(.commute) + km(.business)), xs[2] + 50, y, sumB)
-            drawRight("¥" + yen(totalAmount), right, y, [.font: UIFont.boldSystemFont(ofSize: 13)])
+            drawRight("¥" + yenText(totalAmount), right, y, [.font: UIFont.boldSystemFont(ofSize: 13)])
 
             let madeF = DateFormatter(); madeF.locale = Locale(identifier: "ja_JP"); madeF.dateFormat = "yyyy年M月d日"
             draw("作成日 " + madeF.string(from: Date()), left, pageH - 30,

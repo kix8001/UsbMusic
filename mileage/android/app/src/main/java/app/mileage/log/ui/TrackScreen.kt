@@ -50,6 +50,7 @@ fun TrackScreen() {
     val context = LocalContext.current
     val s by Tracking.state.collectAsState()
     val trips by Store.trips.collectAsState()
+    val settings by Store.settings.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var denied by remember { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
@@ -120,10 +121,17 @@ fun TrackScreen() {
 
         Spacer(Modifier.weight(1f))
 
+        Text(if (s.running) "この走行の区分" else "次の走行の区分", color = Color.Gray, fontSize = 13.sp)
+        CategoryPicker(
+            selected = settings.nextCategory,
+            onSelect = { Store.updateSettings(settings.copy(nextCategory = it)) },
+            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+        )
+
         Button(
             onClick = { if (s.running) confirmStop = true else onStart() },
             shape = CircleShape,
-            modifier = Modifier.size(200.dp),
+            modifier = Modifier.size(180.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (s.running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
             ),
@@ -143,7 +151,7 @@ fun TrackScreen() {
         AlertDialog(
             onDismissRequest = { confirmStop = false },
             title = { Text("計測を終了しますか？") },
-            text = { Text("この走行（${fmtKm2(s.meters / 1000)} km）を履歴に保存します。50m 未満の場合は保存しません。") },
+            text = { Text("この走行（${fmtKm2(s.meters / 1000)} km・${settings.nextCategory.label}）を履歴に保存します。区分や行き先は履歴であとから直せます。50m 未満の場合は保存しません。") },
             confirmButton = {
                 TextButton(onClick = { confirmStop = false; TrackingService.stop(context) }) { Text("終了して保存") }
             },

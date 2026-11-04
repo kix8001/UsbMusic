@@ -46,13 +46,18 @@ struct TrackView: View {
 
             Spacer()
 
+            Text(tracker.running ? "この走行の区分" : "次の走行の区分")
+                .font(.footnote).foregroundStyle(.secondary)
+            CategoryPicker(selection: $store.settings.nextCategory)
+                .padding(.bottom, 12)
+
             Button {
                 if tracker.running { confirmStop = true } else { tracker.start() }
             } label: {
                 Text(tracker.running ? "停止" : "開始")
                     .font(.system(size: 36, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 200, height: 200)
+                    .frame(width: 180, height: 180)
                     .background(Circle().fill(tracker.running ? Color.red : Color.blue))
             }
 
@@ -72,7 +77,7 @@ struct TrackView: View {
             Button("終了して保存") { tracker.stop() }
             Button("続ける", role: .cancel) {}
         } message: {
-            Text("この走行（\(Fmt.km2(tracker.meters / 1000)) km）を履歴に保存します。50m 未満の場合は保存しません。")
+            Text("この走行（\(Fmt.km2(tracker.meters / 1000)) km・\(store.settings.nextCategory.label)）を履歴に保存します。区分や行き先は履歴であとから直せます。50m 未満の場合は保存しません。")
         }
         .alert("位置情報の許可が必要です", isPresented: $tracker.permissionDenied) {
             Button("設定を開く") {

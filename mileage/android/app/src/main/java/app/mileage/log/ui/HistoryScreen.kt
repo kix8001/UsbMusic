@@ -1,7 +1,7 @@
 package app.mileage.log.ui
 
-import android.content.Intent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,18 +13,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -40,11 +41,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.mileage.log.Category
 import app.mileage.log.Store
 import app.mileage.log.Trip
 import java.util.Calendar
@@ -52,46 +54,46 @@ import java.util.TimeZone
 
 @Composable
 fun HistoryScreen() {
-    val context = LocalContext.current
     val trips by Store.trips.collectAsState()
     var editing by remember { mutableStateOf<Trip?>(null) }
     var adding by remember { mutableStateOf(false) }
+    /** null = すべて */
+    var filter by remember { mutableStateOf<Category?>(null) }
 
     val now = System.currentTimeMillis()
     val year = yearOf(now)
     val month = monthKey(now)
-    val yearKm = trips.filter { yearOf(it.start) == year }.sumOf { it.km }
-    val monthKm = trips.filter { monthKey(it.start) == month }.sumOf { it.km }
-    val totalKm = trips.sumOf { it.km }
-    val groups = trips.groupBy { monthKey(it.start) }.toSortedMap(reverseOrder())
+    val claim = trips.filter { it.category == Category.COMMUTE || it.category == Category.BUSINESS }
+    val monthKm = claim.filter { monthKey(it.start) == month }.sumOf { it.km }
+    val yearKm = claim.filter { yearOf(it.start) == year }.sumOf { it.km }
+    val unset = trips.count { it.category == Category.UNSET }
+    val shown = if (filter == null) trips else trips.filter { it.category == filter }
+    val groups = shown.groupBy { monthKey(it.start) }.toSortedMap(reverseOrder())
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("履歴", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                IconButton(onClick = {
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "走行距離ログ")
-                        putExtra(Intent.EXTRA_TEXT, Store.toCsv())
-                    }
-                    context.startActivity(Intent.createChooser(send, "CSV を共有"))
-                }) { Icon(Icons.Filled.Share, "CSV を共有") }
-            }
+            Text("履歴", fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 20.dp, top = 16.dp))
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SummaryCard("今月", monthKm, Modifier.weight(1f))
-                SummaryCard("${year}年", yearKm, Modifier.weight(1f))
-                SummaryCard("累計", totalKm, Modifier.weight(1f))
+                SummaryCard("今月（通勤＋業務）", monthKm, Modifier.weight(1f))
+                SummaryCard("${year}年（通勤＋業務）", yearKm, Modifier.weight(1f))
             }
-            if (trips.isEmpty()) {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(selected = filter == null, onClick = { filter = null }, label = { Text("すべて") })
+                listOf(Category.UNSET, Category.COMMUTE, Category.BUSINESS, Category.PRIVATE).forEach { c ->
+                    val label = if (c == Category.UNSET && unset > 0) "${c.label}（$unset）" else c.label
+                    FilterChip(selected = filter == c, onClick = { filter = c }, label = { Text(label) })
+                }
+            }
+            if (shown.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("まだ記録がありません", color = Color.Gray)
+                    Text(if (trips.isEmpty()) "まだ記録がありません" else "該当する記録はありません", color = Color.Gray)
                 }
             }
             LazyColumn(Modifier.fillMaxSize()) {
@@ -128,16 +130,24 @@ fun HistoryScreen() {
 @Composable
 private fun TripRow(t: Trip, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(fmtDay(t.start), fontSize = 16.sp)
-            val sub = buildString {
-                if (t.manual) append("手入力") else append("${fmtTime(t.start)}〜${fmtTime(t.end)}")
-                if (t.note.isNotBlank()) append(" ・ ").append(t.note)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CategoryBadge(t.category)
+                Spacer(Modifier.width(8.dp))
+                Text(fmtDay(t.start), fontSize = 16.sp)
+                Spacer(Modifier.width(8.dp))
+                Text(if (t.manual) "手入力" else "${fmtTime(t.start)}〜${fmtTime(t.end)}",
+                    color = Color.Gray, fontSize = 13.sp)
             }
-            Text(sub, color = Color.Gray, fontSize = 13.sp, maxLines = 1)
+            val what = listOf(t.destination, t.purpose, t.note).filter { it.isNotBlank() }.joinToString(" ・ ")
+            if (what.isNotEmpty()) Text(what, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (t.startAddr.isNotBlank() || t.endAddr.isNotBlank()) {
+                Text("${t.startAddr.ifBlank { "?" }} → ${t.endAddr.ifBlank { "?" }}",
+                    color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         Spacer(Modifier.width(12.dp))
         Text("${fmtKm(t.km)} km", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
@@ -151,9 +161,44 @@ fun parseKm(s: String): Double? {
     return half.toDoubleOrNull()?.takeIf { it >= 0 }
 }
 
+/** 行き先・用件などの入力欄をまとめたもの */
+@Composable
+private fun TripFields(
+    category: Category, onCategory: (Category) -> Unit,
+    km: String, onKm: (String) -> Unit, kmError: Boolean,
+    destination: String, onDestination: (String) -> Unit,
+    purpose: String, onPurpose: (String) -> Unit,
+    startAddr: String, onStartAddr: (String) -> Unit,
+    endAddr: String, onEndAddr: (String) -> Unit,
+    note: String, onNote: (String) -> Unit,
+) {
+    CategoryPicker(category, onCategory, Modifier.padding(top = 4.dp))
+    OutlinedTextField(
+        value = km, onValueChange = onKm, label = { Text("距離 (km)") },
+        singleLine = true, isError = kmError,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+    )
+    OutlinedTextField(destination, onDestination, label = { Text("行き先（訪問先など）") },
+        singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+    OutlinedTextField(purpose, onPurpose, label = { Text("用件") },
+        singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+    OutlinedTextField(startAddr, onStartAddr, label = { Text("出発地") },
+        singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+    OutlinedTextField(endAddr, onEndAddr, label = { Text("到着地") },
+        singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+    OutlinedTextField(note, onNote, label = { Text("メモ") },
+        singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+}
+
 @Composable
 private fun TripEditDialog(t: Trip, onDismiss: () -> Unit) {
+    var category by remember { mutableStateOf(t.category) }
     var km by remember { mutableStateOf(String.format(java.util.Locale.US, "%.2f", t.km)) }
+    var destination by remember { mutableStateOf(t.destination) }
+    var purpose by remember { mutableStateOf(t.purpose) }
+    var startAddr by remember { mutableStateOf(t.startAddr) }
+    var endAddr by remember { mutableStateOf(t.endAddr) }
     var note by remember { mutableStateOf(t.note) }
     var confirmDelete by remember { mutableStateOf(false) }
     val kmVal = parseKm(km)
@@ -175,18 +220,13 @@ private fun TripEditDialog(t: Trip, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(fmtFull(t.start)) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (!t.manual) Text("${fmtTime(t.start)}〜${fmtTime(t.end)}（${fmtDuration(t.end - t.start)}）",
                     color = Color.Gray)
-                OutlinedTextField(
-                    value = km, onValueChange = { km = it }, label = { Text("距離 (km)") },
-                    singleLine = true, isError = kmVal == null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-                OutlinedTextField(
-                    value = note, onValueChange = { note = it }, label = { Text("メモ（行き先など）") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                TripFields(
+                    category, { category = it }, km, { km = it }, kmVal == null,
+                    destination, { destination = it }, purpose, { purpose = it },
+                    startAddr, { startAddr = it }, endAddr, { endAddr = it }, note, { note = it },
                 )
                 OutlinedButton(onClick = { confirmDelete = true }, modifier = Modifier.padding(top = 12.dp)) {
                     Text("削除", color = MaterialTheme.colorScheme.error)
@@ -195,7 +235,12 @@ private fun TripEditDialog(t: Trip, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(enabled = kmVal != null, onClick = {
-                Store.updateTrip(t.copy(meters = (kmVal ?: t.km) * 1000, note = note.trim()))
+                Store.updateTrip(t.copy(
+                    meters = (kmVal ?: t.km) * 1000,
+                    category = category,
+                    destination = destination.trim(), purpose = purpose.trim(),
+                    startAddr = startAddr.trim(), endAddr = endAddr.trim(), note = note.trim(),
+                ))
                 onDismiss()
             }) { Text("保存") }
         },
@@ -206,7 +251,12 @@ private fun TripEditDialog(t: Trip, onDismiss: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ManualTripDialog(onDismiss: () -> Unit) {
+    var category by remember { mutableStateOf(Store.settings.value.nextCategory) }
     var km by remember { mutableStateOf("") }
+    var destination by remember { mutableStateOf("") }
+    var purpose by remember { mutableStateOf("") }
+    var startAddr by remember { mutableStateOf("") }
+    var endAddr by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var day by remember { mutableStateOf(startOfToday()) }
     var picking by remember { mutableStateOf(false) }
@@ -242,19 +292,14 @@ private fun ManualTripDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("走行を手入力") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(fmtDay(day))
                 }
-                OutlinedTextField(
-                    value = km, onValueChange = { km = it }, label = { Text("距離 (km)") },
-                    singleLine = true, isError = km.isNotEmpty() && kmVal == null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-                OutlinedTextField(
-                    value = note, onValueChange = { note = it }, label = { Text("メモ（行き先など）") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                TripFields(
+                    category, { category = it }, km, { km = it }, km.isNotEmpty() && kmVal == null,
+                    destination, { destination = it }, purpose, { purpose = it },
+                    startAddr, { startAddr = it }, endAddr, { endAddr = it }, note, { note = it },
                 )
             }
         },
@@ -262,7 +307,12 @@ private fun ManualTripDialog(onDismiss: () -> Unit) {
             TextButton(enabled = kmVal != null && kmVal > 0, onClick = {
                 // 時刻は正午にしておく（日付の境目で別の日に入らないように）
                 val t = day + 12 * 60 * 60 * 1000L
-                Store.addTrip(t, t, (kmVal ?: 0.0) * 1000, note.trim(), manual = true)
+                Store.addTrip(Trip(
+                    id = Store.newId(), start = t, end = t, meters = (kmVal ?: 0.0) * 1000,
+                    note = note.trim(), manual = true, category = category,
+                    destination = destination.trim(), purpose = purpose.trim(),
+                    startAddr = startAddr.trim(), endAddr = endAddr.trim(),
+                ))
                 onDismiss()
             }) { Text("追加") }
         },

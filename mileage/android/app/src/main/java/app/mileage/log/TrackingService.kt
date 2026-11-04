@@ -63,6 +63,9 @@ class TrackingService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var listening = false
     private var last: Location? = null
+    /** 出発地（最初に取れた良い位置）と、最後に取れた良い位置。住所の自動入力に使う */
+    private var firstLoc: Pair<Double, Double>? = null
+    private var lastLoc: Pair<Double, Double>? = null
     private var lastNotify = 0L
     private var lastPersist = 0L
 
@@ -95,7 +98,9 @@ class TrackingService : Service() {
             ACTION_START -> {
                 if (!Tracking.state.value.running) {
                     val now = System.currentTimeMillis()
-                    prefs.edit().putLong("start", now).putFloat("meters", 0f).apply()
+                    prefs.edit().clear().putLong("start", now).putFloat("meters", 0f).apply()
+                    firstLoc = null
+                    lastLoc = null
                     begin(now, 0.0)
                 }
             }
@@ -105,6 +110,9 @@ class TrackingService : Service() {
                 if (start == 0L) {
                     stopSelf()
                     return START_NOT_STICKY
+                }
+                if (prefs.contains("firstLat")) {
+                    firstLoc = prefs.getFloat("firstLat", 0f).toDouble() to prefs.getFloat("firstLon", 0f).toDouble()
                 }
                 begin(start, prefs.getFloat("meters", 0f).toDouble())
             }
@@ -151,6 +159,14 @@ class TrackingService : Service() {
             Tracking.mutable.value = s.copy(accuracy = acc, hasFix = false)
             return
         }
+        val here = loc.latitude to loc.longitude
+        if (firstLoc == null) {
+            firstLoc = here
+            // Float だと誤差が数m出るが、住所を引くには十分
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putFloat("firstLat", here.first.toFloat()).putFloat("firstLon", here.second.toFloat()).apply()
+        }
+        lastLoc = here
         var meters = s.meters
         val prev = last
         if (prev == null) {
@@ -187,7 +203,20 @@ class TrackingService : Service() {
         val start = if (s.running) s.startTime else prefs.getLong("start", 0L)
         val meters = if (s.running) s.meters else prefs.getFloat("meters", 0f).toDouble()
         if (start != 0L && meters >= MIN_SAVE_METERS) {
-            Store.addTrip(start, System.currentTimeMillis(), meters)
+            val first = firstLoc ?: if (prefs.contains("firstLat"))
+                prefs.getFloat("firstLat", 0f).toDouble() to prefs.getFloat("firstLon", 0f).toDouble() else null
+            Store.addTrip(
+                Trip(
+                    id = Store.newId(),
+                    start = start,
+                    end = System.currentTimeMillis(),
+                    meters = meters,
+                    category = Store.settings.value.nextCategory,
+                    startLat = first?.first, startLon = first?.second,
+                    endLat = lastLoc?.first, endLon = lastLoc?.second,
+                )
+            )
+            Geo.fillMissing(this)
         }
         prefs.edit().clear().apply()
         Tracking.mutable.value = Tracking.State()
@@ -202,6 +231,8 @@ class TrackingService : Service() {
             listening = false
         }
         last = null
+        firstLoc = null
+        lastLoc = null
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
     }

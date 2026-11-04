@@ -24,6 +24,9 @@ final class Tracker: NSObject, ObservableObject {
 
     private let manager = CLLocationManager()
     private var last: CLLocation?
+    /// 出発地（最初に取れた良い位置）と、最後に取れた良い位置。住所の自動入力に使う
+    private var firstLoc: CLLocationCoordinate2D?
+    private var lastLoc: CLLocationCoordinate2D?
     private var pendingStart = false
     private var lastPersist = Date.distantPast
     private let defaults = UserDefaults.standard
@@ -38,6 +41,10 @@ final class Tracker: NSObject, ObservableObject {
         // 計測中にアプリが終了されていたら、続きから再開する
         let saved = defaults.double(forKey: "active.start")
         if saved > 0 {
+            if defaults.object(forKey: "active.firstLat") != nil {
+                firstLoc = CLLocationCoordinate2D(latitude: defaults.double(forKey: "active.firstLat"),
+                                                  longitude: defaults.double(forKey: "active.firstLon"))
+            }
             begin(start: Date(timeIntervalSince1970: saved), meters: defaults.double(forKey: "active.meters"))
         }
     }
@@ -54,6 +61,10 @@ final class Tracker: NSObject, ObservableObject {
             let now = Date()
             defaults.set(now.timeIntervalSince1970, forKey: "active.start")
             defaults.set(0.0, forKey: "active.meters")
+            defaults.removeObject(forKey: "active.firstLat")
+            defaults.removeObject(forKey: "active.firstLon")
+            firstLoc = nil
+            lastLoc = nil
             begin(start: now, meters: 0)
         }
     }
@@ -74,10 +85,19 @@ final class Tracker: NSObject, ObservableObject {
         manager.stopUpdatingLocation()
         manager.allowsBackgroundLocationUpdates = false
         if meters >= Tracker.minSaveMeters {
-            Store.shared.addTrip(start: startTime, end: Date(), meters: meters)
+            Store.shared.addTrip(Trip(
+                start: startTime, end: Date(), meters: meters,
+                category: Store.shared.settings.nextCategory,
+                startLat: firstLoc?.latitude, startLon: firstLoc?.longitude,
+                endLat: lastLoc?.latitude, endLon: lastLoc?.longitude
+            ))
+            Store.shared.fillMissingAddresses()
         }
-        defaults.removeObject(forKey: "active.start")
-        defaults.removeObject(forKey: "active.meters")
+        for k in ["active.start", "active.meters", "active.firstLat", "active.firstLon"] {
+            defaults.removeObject(forKey: k)
+        }
+        firstLoc = nil
+        lastLoc = nil
         running = false
         meters = 0
         speedKmh = 0
@@ -95,6 +115,12 @@ final class Tracker: NSObject, ObservableObject {
             return
         }
         hasFix = true
+        if firstLoc == nil {
+            firstLoc = loc.coordinate
+            defaults.set(loc.coordinate.latitude, forKey: "active.firstLat")
+            defaults.set(loc.coordinate.longitude, forKey: "active.firstLon")
+        }
+        lastLoc = loc.coordinate
         guard let prev = last else {
             last = loc
             return

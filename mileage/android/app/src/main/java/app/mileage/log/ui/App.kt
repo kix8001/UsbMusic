@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +50,9 @@ fun App() {
                         icon = { Icon(Icons.Filled.List, null) }, label = { Text("履歴") })
                     NavigationBarItem(
                         selected = tab == 2, onClick = { tab = 2 },
+                        icon = { Icon(Icons.Filled.Description, null) }, label = { Text("レポート") })
+                    NavigationBarItem(
+                        selected = tab == 3, onClick = { tab = 3 },
                         icon = { Icon(Icons.Filled.Speed, null) }, label = { Text("メーター") })
                 }
             }
@@ -57,6 +61,7 @@ fun App() {
                 when (tab) {
                     0 -> TrackScreen()
                     1 -> HistoryScreen()
+                    2 -> ReportScreen()
                     else -> OdometerScreen()
                 }
             }

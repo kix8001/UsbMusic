@@ -1,4 +1,23 @@
+import CoreLocation
 import Foundation
+
+/// 走行の区分。通勤・業務はガソリン代の支給対象、私用は対象外
+enum Category: String, Codable, CaseIterable, Identifiable {
+    case unset = "UNSET", commute = "COMMUTE", business = "BUSINESS", personal = "PRIVATE"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .unset: return "未分類"
+        case .commute: return "通勤"
+        case .business: return "業務"
+        case .personal: return "私用"
+        }
+    }
+    var isClaim: Bool { self == .commute || self == .business }
+    /// 選ぶ画面での並び順
+    static let ordered: [Category] = [.commute, .business, .personal, .unset]
+}
 
 /// 1回の走行。GPS で測ったもの（manual = false）と手入力したもの（manual = true）がある
 struct Trip: Codable, Identifiable, Equatable {
@@ -8,8 +27,52 @@ struct Trip: Codable, Identifiable, Equatable {
     var meters: Double
     var note: String = ""
     var manual: Bool = false
+    var category: Category = .unset
+    /// 行き先（訪問先の名前など）
+    var destination: String = ""
+    /// 用件
+    var purpose: String = ""
+    /// 出発地・到着地の住所（GPS の位置から自動で入れる。手で直してもよい）
+    var startAddr: String = ""
+    var endAddr: String = ""
+    var startLat: Double?
+    var startLon: Double?
+    var endLat: Double?
+    var endLon: Double?
 
     var km: Double { meters / 1000 }
+    /// 申請に使う距離（0.1km 単位に四捨五入）
+    var reportKm: Double { (meters / 100).rounded() / 10 }
+
+    init(start: Date, end: Date, meters: Double, note: String = "", manual: Bool = false,
+         category: Category = .unset, destination: String = "", purpose: String = "",
+         startAddr: String = "", endAddr: String = "",
+         startLat: Double? = nil, startLon: Double? = nil, endLat: Double? = nil, endLon: Double? = nil) {
+        self.start = start; self.end = end; self.meters = meters; self.note = note; self.manual = manual
+        self.category = category; self.destination = destination; self.purpose = purpose
+        self.startAddr = startAddr; self.endAddr = endAddr
+        self.startLat = startLat; self.startLon = startLon; self.endLat = endLat; self.endLon = endLon
+    }
+
+    // 古いデータに無い項目があっても読めるようにする
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        start = try c.decode(Date.self, forKey: .start)
+        end = try c.decode(Date.self, forKey: .end)
+        meters = try c.decode(Double.self, forKey: .meters)
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        manual = try c.decodeIfPresent(Bool.self, forKey: .manual) ?? false
+        category = (try? c.decodeIfPresent(Category.self, forKey: .category)) ?? .unset
+        destination = try c.decodeIfPresent(String.self, forKey: .destination) ?? ""
+        purpose = try c.decodeIfPresent(String.self, forKey: .purpose) ?? ""
+        startAddr = try c.decodeIfPresent(String.self, forKey: .startAddr) ?? ""
+        endAddr = try c.decodeIfPresent(String.self, forKey: .endAddr) ?? ""
+        startLat = try c.decodeIfPresent(Double.self, forKey: .startLat)
+        startLon = try c.decodeIfPresent(Double.self, forKey: .startLon)
+        endLat = try c.decodeIfPresent(Double.self, forKey: .endLat)
+        endLon = try c.decodeIfPresent(Double.self, forKey: .endLon)
+    }
 }
 
 /// オドメーター（車のメーター）の記録
@@ -20,16 +83,38 @@ struct OdoEntry: Codable, Identifiable, Equatable {
     var note: String = ""
 }
 
-/// 走行記録とメーター記録を Documents/data.json に保存する
+struct Settings: Codable, Equatable {
+    /// 1km あたりの支給額（円）
+    var commuteRate: Double = 18
+    var businessRate: Double = 36
+    /// レポートに載せる氏名
+    var name: String = ""
+    /// 次に計測する走行の区分（計測画面で選ぶ）
+    var nextCategory: Category = .unset
+
+    func rate(_ c: Category) -> Double {
+        switch c {
+        case .commute: return commuteRate
+        case .business: return businessRate
+        default: return 0
+        }
+    }
+}
+
+/// 走行記録・メーター記録・設定を Documents/data.json に保存する
 final class Store: ObservableObject {
     static let shared = Store()
 
     @Published private(set) var trips: [Trip] = []
     @Published private(set) var odos: [OdoEntry] = []
+    @Published var settings = Settings() {
+        didSet { if settings != oldValue { save() } }
+    }
 
     private struct Payload: Codable {
         var trips: [Trip]
         var odos: [OdoEntry]
+        var settings: Settings?
     }
 
     private let url: URL = FileManager.default
@@ -42,6 +127,7 @@ final class Store: ObservableObject {
             let p = try JSONDecoder().decode(Payload.self, from: data)
             trips = p.trips.sorted { $0.start > $1.start }
             odos = p.odos.sorted { $0.time > $1.time }
+            if let s = p.settings { settings = s }
         } catch {
             // 壊れていたら退避して空から始める
             let broken = url.deletingLastPathComponent()
@@ -50,8 +136,8 @@ final class Store: ObservableObject {
         }
     }
 
-    func addTrip(start: Date, end: Date, meters: Double, note: String = "", manual: Bool = false) {
-        trips.append(Trip(start: start, end: end, meters: meters, note: note, manual: manual))
+    func addTrip(_ trip: Trip) {
+        trips.append(trip)
         trips.sort { $0.start > $1.start }
         save()
     }
@@ -81,29 +167,60 @@ final class Store: ObservableObject {
 
     private func save() {
         do {
-            let data = try JSONEncoder().encode(Payload(trips: trips, odos: odos))
+            let data = try JSONEncoder().encode(Payload(trips: trips, odos: odos, settings: settings))
             try data.write(to: url, options: .atomic)
         } catch {
             print("保存に失敗: \(error)")
         }
     }
 
-    /// 表計算ソフトで開ける CSV
-    func csv() -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.dateFormat = "yyyy/MM/dd HH:mm"
-        func q(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
-        var s = "開始,終了,距離(km),種別,メモ\n"
-        for t in trips.sorted(by: { $0.start < $1.start }) {
-            s += "\(f.string(from: t.start)),\(f.string(from: t.end)),\(String(format: "%.2f", t.km)),\(t.manual ? "手入力" : "GPS"),\(q(t.note))\n"
-        }
-        if !odos.isEmpty {
-            s += "\n日時,メーター(km),メモ\n"
-            for o in odos.sorted(by: { $0.time < $1.time }) {
-                s += "\(f.string(from: o.time)),\(String(format: "%.1f", o.km)),\(q(o.note))\n"
+    // MARK: - 住所の自動入力
+
+    private var geocoding = false
+
+    /// 住所が空で、位置だけ残っている走行の住所を埋める（ネットが必要。失敗したら次回やり直す）
+    func fillMissingAddresses() {
+        guard !geocoding else { return }
+        var jobs: [(UUID, Bool, CLLocation)] = []
+        for t in trips {
+            if t.startAddr.isEmpty, let la = t.startLat, let lo = t.startLon {
+                jobs.append((t.id, true, CLLocation(latitude: la, longitude: lo)))
+            }
+            if t.endAddr.isEmpty, let la = t.endLat, let lo = t.endLon {
+                jobs.append((t.id, false, CLLocation(latitude: la, longitude: lo)))
             }
         }
-        return s
+        guard !jobs.isEmpty else { return }
+        geocoding = true
+        geocodeNext(jobs[...])
+    }
+
+    // CLGeocoder は同時に1件ずつしか引けないので順番に処理する
+    private func geocodeNext(_ jobs: ArraySlice<(UUID, Bool, CLLocation)>) {
+        guard let job = jobs.first else {
+            geocoding = false
+            return
+        }
+        let (id, isStart, loc) = job
+        CLGeocoder().reverseGeocodeLocation(loc, preferredLocale: Locale(identifier: "ja_JP")) { [weak self] marks, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let p = marks?.first, let i = self.trips.firstIndex(where: { $0.id == id }) {
+                    let addr = [p.administrativeArea, p.locality, p.subLocality, p.thoroughfare, p.subThoroughfare]
+                        .compactMap { $0 }.joined()
+                    if !addr.isEmpty {
+                        if isStart, self.trips[i].startAddr.isEmpty { self.trips[i].startAddr = addr }
+                        if !isStart, self.trips[i].endAddr.isEmpty { self.trips[i].endAddr = addr }
+                        self.save()
+                    }
+                } else if marks == nil {
+                    // ネットが無いなどで失敗：残りは次回
+                    self.geocoding = false
+                    return
+                }
+                // 連続で引くと制限されるので少し間をあける
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.geocodeNext(jobs.dropFirst()) }
+            }
+        }
     }
 }

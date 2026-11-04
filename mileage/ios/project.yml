@@ -13,8 +13,8 @@ targets:
       path: Mileage/Info.plist
       properties:
         CFBundleDisplayName: 走行距離ログ
-        CFBundleShortVersionString: "0.2.1"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "0.2.2"
+        CFBundleVersion: "4"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

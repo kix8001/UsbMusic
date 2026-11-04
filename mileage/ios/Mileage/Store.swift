@@ -89,8 +89,19 @@ struct Settings: Codable, Equatable {
     var businessRate: Double = 36
     /// レポートに載せる氏名
     var name: String = ""
-    /// 次に計測する走行の区分（計測画面で選ぶ）
-    var nextCategory: Category = .unset
+    /// 次に計測する走行の区分（計測画面で選ぶ）。基本は業務
+    var nextCategory: Category = .business
+
+    init() {}
+
+    // 古いデータに無い項目があっても読めるようにする
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        commuteRate = try c.decodeIfPresent(Double.self, forKey: .commuteRate) ?? 18
+        businessRate = try c.decodeIfPresent(Double.self, forKey: .businessRate) ?? 36
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        nextCategory = (try? c.decodeIfPresent(Category.self, forKey: .nextCategory)) ?? .business
+    }
 
     func rate(_ c: Category) -> Double {
         switch c {

@@ -56,8 +56,8 @@ data class Settings(
     val businessRate: Double = 36.0,
     /** レポートに載せる氏名 */
     val name: String = "",
-    /** 次に計測する走行の区分（計測画面で選ぶ） */
-    val nextCategory: Category = Category.UNSET,
+    /** 次に計測する走行の区分（計測画面で選ぶ）。基本は業務 */
+    val nextCategory: Category = Category.BUSINESS,
 ) {
     fun rate(c: Category): Double = when (c) {
         Category.COMMUTE -> commuteRate
@@ -105,7 +105,7 @@ object Store {
                     commuteRate = s.optDouble("commuteRate", 18.0),
                     businessRate = s.optDouble("businessRate", 36.0),
                     name = s.optString("name", ""),
-                    nextCategory = Category.of(s.optString("nextCategory")),
+                    nextCategory = if (s.has("nextCategory")) Category.of(s.optString("nextCategory")) else Category.BUSINESS,
                 )
             }
         } catch (e: Exception) {

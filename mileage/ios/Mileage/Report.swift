@@ -28,10 +28,13 @@ struct MonthReport {
     }
     func count(_ c: Category) -> Int { trips.filter { $0.category == c }.count }
 
-    /// 区分ごとの支給額 = その月の合計距離 × 単価（円未満切り捨て）
-    func amount(_ c: Category) -> Int { Int((km(c) * settings.rate(c) + 1e-6).rounded(.down)) }
+    /// 区分ごとの支給額 = その月の合計距離 × 単価（円未満四捨五入）
+    func amount(_ c: Category) -> Int { yen(km(c) * settings.rate(c)) }
     var totalAmount: Int { amount(.commute) + amount(.business) }
-    func tripAmount(_ t: Trip) -> Int { Int((t.reportKm * settings.rate(t.category) + 1e-6).rounded(.down)) }
+    func tripAmount(_ t: Trip) -> Int { yen(t.reportKm * settings.rate(t.category)) }
+
+    /// 円未満を四捨五入（小数の誤差で 0.5 が 0.4999… になっても切り上がるよう少し足す）
+    private func yen(_ v: Double) -> Int { Int((v + 0.5 + 1e-9).rounded(.down)) }
 
     static func fmtRate(_ r: Double) -> String {
         r == r.rounded() ? String(Int(r)) : String(format: "%.1f", r)

@@ -24,13 +24,16 @@ class MonthReport(val year: Int, val month: Int, allTrips: List<Trip>, val setti
     fun km(c: Category): Double = trips.filter { it.category == c }.sumOf { it.reportKm }.round1()
     fun count(c: Category): Int = trips.count { it.category == c }
 
-    /** 区分ごとの支給額 = その月の合計距離 × 単価（円未満切り捨て） */
-    fun amount(c: Category): Long = Math.floor(km(c) * settings.rate(c) + 1e-6).toLong()
+    /** 区分ごとの支給額 = その月の合計距離 × 単価（円未満四捨五入） */
+    fun amount(c: Category): Long = yen(km(c) * settings.rate(c))
     val totalAmount: Long get() = amount(Category.COMMUTE) + amount(Category.BUSINESS)
 
-    fun tripAmount(t: Trip): Long = Math.floor(t.reportKm * settings.rate(t.category) + 1e-6).toLong()
+    fun tripAmount(t: Trip): Long = yen(t.reportKm * settings.rate(t.category))
 
     val title: String get() = "${year}年${month}月"
+
+    /** 円未満を四捨五入（小数の誤差で 0.5 が 0.4999… になっても切り上がるよう少し足す） */
+    private fun yen(v: Double): Long = Math.floor(v + 0.5 + 1e-9).toLong()
 
     private fun Double.round1() = Math.round(this * 10) / 10.0
 

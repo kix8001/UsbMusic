@@ -3,6 +3,10 @@ name: Build APK
 on:
   push:
     branches: [ '**' ]
+    # 走行距離アプリ（mileage/）だけの変更では mTunes をビルドしない
+    paths-ignore:
+      - 'mileage/**'
+      - '.github/workflows/mileage-*.yml'
   workflow_dispatch:
 jobs:
   build:

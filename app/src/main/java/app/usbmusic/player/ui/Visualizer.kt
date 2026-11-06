@@ -60,6 +60,15 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     LIGHTS("lights", "イルミネーション", "色が流れる電球が音に合わせて点灯します"),
     RIPPLE("ripple", "波紋", "しずくが落ちて波紋が広がり、重なって消えていきます"),
     RIPPLE_TOP("ripple_top", "カラー波紋", "真上から見た水面に、色とりどりの波紋が広がります"),
+    DOT_AUTO("dot_auto", "ドット絵 おまかせ", "曲が変わるたびに、8つのドット絵が順番に切り替わります"),
+    DOT_CLUB("dot_club", "ドット絵 クラブ", "2台のターンテーブルとミキサー。拍でクロスフェーダーと音符"),
+    DOT_DRIVE("dot_drive", "ドット絵 ナイトドライブ", "夜の高速道路を走る車。音量で速さ、拍でブレーキランプ"),
+    DOT_SPEAKER("dot_speaker", "ドット絵 スピーカー", "低音でウーファーが動き、拍で音の輪が広がります"),
+    DOT_LIVE("dot_live", "ドット絵 ライブ", "スポットライトのステージ。拍で観客がジャンプ"),
+    DOT_SUNSET("dot_sunset", "ドット絵 サンセット", "しま模様の夕日と海とヤシの木。低音で波が高く"),
+    DOT_CITY("dot_city", "ドット絵 シティ", "16棟のビルの窓明かりがイコライザーになります"),
+    DOT_SPACE("dot_space", "ドット絵 スペース", "輪のある惑星と回る月。ときどき流れ星"),
+    DOT_AQUA("dot_aqua", "ドット絵 アクアリウム", "魚と水草。拍で宝箱が開いて泡がのぼります"),
     ;
 
     companion object {
@@ -174,6 +183,13 @@ private class Meter {
     var dotState = 0
     var dotTimer = 0f
 
+    // ドット絵（使うときに作る）
+    private var dot: DotState? = null
+    fun drawDot(scope: androidx.compose.ui.graphics.drawscope.DrawScope, index: Int, caption: String, time: String) {
+        val d = dot ?: DotState().also { dot = it }
+        d.render(scope, index, bands(level, 16), dt, caption, time)
+    }
+
     // アナログVUの針（ばねのように動く）
     val needle = FloatArray(2)
     val needleVel = FloatArray(2)
@@ -244,6 +260,15 @@ fun Visualizer(
                 VisStyle.WAVE -> drawWave(meter)
                 VisStyle.CIRCLE -> drawCircleVis(meter, t)
                 VisStyle.LIGHTS -> drawLights(meter, t)
+                VisStyle.DOT_AUTO -> meter.drawDot(this, -1, currentCaption, currentTime())
+                VisStyle.DOT_CLUB -> meter.drawDot(this, 0, currentCaption, currentTime())
+                VisStyle.DOT_DRIVE -> meter.drawDot(this, 1, currentCaption, currentTime())
+                VisStyle.DOT_SPEAKER -> meter.drawDot(this, 2, currentCaption, currentTime())
+                VisStyle.DOT_LIVE -> meter.drawDot(this, 3, currentCaption, currentTime())
+                VisStyle.DOT_SUNSET -> meter.drawDot(this, 4, currentCaption, currentTime())
+                VisStyle.DOT_CITY -> meter.drawDot(this, 5, currentCaption, currentTime())
+                VisStyle.DOT_SPACE -> meter.drawDot(this, 6, currentCaption, currentTime())
+                VisStyle.DOT_AQUA -> meter.drawDot(this, 7, currentCaption, currentTime())
                 VisStyle.OFF -> Unit
             }
         }
@@ -972,7 +997,7 @@ private fun dotLabel(text: String): Pair<Int, BooleanArray> =
 
 // ---------------- VFDスペクトラム 3D（1層・低く横に広い台形＋昔のカーステ風の表示） ----------------
 
-private const val DOT_ROWS = 14 // ドットフォント12px（上11・下3）がちょうど収まる高さ
+internal const val DOT_ROWS = 14 // ドットフォント12px（上11・下3）がちょうど収まる高さ
 
 /** 昔の表示器のような点で描くために作られたドットフォント（PixelMplus12 / M+ FONT LICENSE） */
 private object DotFont {
@@ -987,7 +1012,7 @@ private val VfdCyan = Color(0xFF7FE0FF)
 private val VfdAmber = Color(0xFFFFD84A)
 
 /** 文字を小さな白黒の点の集まりに変換（日本語もそのままドット表示できる） */
-private fun textToDots(text: String): Pair<Int, BooleanArray> {
+internal fun textToDots(text: String): Pair<Int, BooleanArray> {
     if (text.isEmpty()) return 0 to BooleanArray(0)
     val paint = Paint().apply {
         isAntiAlias = false

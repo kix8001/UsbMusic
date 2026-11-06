@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import UserNotifications
 
 /// GPS で走行距離を測る。バックグラウンドでも計測を続ける（Info.plist の UIBackgroundModes: location）
 final class Tracker: NSObject, ObservableObject {
@@ -12,6 +13,26 @@ final class Tracker: NSObject, ObservableObject {
     @Published private(set) var accuracy: Double?
     @Published private(set) var hasFix = false
     @Published var permissionDenied = false
+    /// 止まったままなので「運転を終了しましたか？」と聞いているところ
+    @Published private(set) var askEnd = false
+    /// 最後に動いた時刻（終了するときはこの時刻で保存する）
+    @Published private(set) var stoppedAt = Date()
+    /// 答えがなければこの時刻に自動で保存する
+    @Published private(set) var autoSaveAt = Date()
+
+    /// この距離（m）以上動いたら「動いている」とみなす（止まっているときの GPS のゆらぎより大きく）
+    private let moveRadius = 50.0
+    /// GPS が切れる直前にこの速度（km/h）以上で走っていたら、トンネルとみなして止まった扱いにしない
+    private let tunnelSpeed = 20.0
+    /// この時間（秒）位置が取れなければ GPS が切れたとみなす
+    private let fixLostSeconds = 20.0
+    private var anchor: CLLocation?
+    private var lastMoveTime = Date()
+    private var lastFixAt = Date.distantPast
+    private var lastFixSpeed = 0.0
+    /// 「まだ運転中」と答えたので、次に動き出すまで聞かない
+    private var snoozed = false
+    private var timer: Timer?
 
     /// これより悪い精度（m）の位置は使わない
     private let maxAccuracy = 25.0
@@ -36,8 +57,10 @@ final class Tracker: NSObject, ObservableObject {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.activityType = .automotiveNavigation
-        manager.distanceFilter = 5
+        // 止まっていても位置を受け取り続ける（止まったことの判定に使う）
+        manager.distanceFilter = kCLDistanceFilterNone
         manager.pausesLocationUpdatesAutomatically = false
+        setUpNotifications()
         // 計測中にアプリが終了されていたら、続きから再開する
         let saved = defaults.double(forKey: "active.start")
         if saved > 0 {
@@ -75,23 +98,36 @@ final class Tracker: NSObject, ObservableObject {
         last = nil
         hasFix = false
         running = true
+        lastMoveTime = Date()
+        anchor = nil
+        snoozed = false
+        askEnd = false
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            self?.checkStopped()
+        }
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
         manager.startUpdatingLocation()
     }
 
-    func stop() {
+    /// 計測を終えて保存する。end は終了時刻（止まった時刻で終える場合はその時刻）
+    func stop(end: Date = Date(), auto: Bool = false) {
         guard running else { return }
+        timer?.invalidate()
+        timer = nil
+        clearAsk()
         manager.stopUpdatingLocation()
         manager.allowsBackgroundLocationUpdates = false
         if meters >= Tracker.minSaveMeters {
             Store.shared.addTrip(Trip(
-                start: startTime, end: Date(), meters: meters,
+                start: startTime, end: max(startTime, end), meters: meters,
                 category: Store.shared.settings.nextCategory,
                 startLat: firstLoc?.latitude, startLon: firstLoc?.longitude,
                 endLat: lastLoc?.latitude, endLon: lastLoc?.longitude
             ))
             Store.shared.fillMissingAddresses()
+            if auto { notifySaved(meters: meters, end: end) }
         }
         for k in ["active.start", "active.meters", "active.firstLat", "active.firstLon"] {
             defaults.removeObject(forKey: k)
@@ -115,6 +151,15 @@ final class Tracker: NSObject, ObservableObject {
             return
         }
         hasFix = true
+        lastFixAt = Date()
+        lastFixSpeed = max(0, loc.speed * 3.6)
+        if anchor == nil || loc.distance(from: anchor!) >= moveRadius {
+            // 動いた：止まった判定をやり直す
+            anchor = loc
+            lastMoveTime = Date()
+            snoozed = false
+            if askEnd { clearAsk() }
+        }
         if firstLoc == nil {
             firstLoc = loc.coordinate
             defaults.set(loc.coordinate.latitude, forKey: "active.firstLat")
@@ -137,6 +182,107 @@ final class Tracker: NSObject, ObservableObject {
         if Date().timeIntervalSince(lastPersist) > 5 {
             lastPersist = Date()
             defaults.set(meters, forKey: "active.meters")
+        }
+    }
+}
+
+// MARK: - 止まったことの判定と「運転を終了しましたか？」
+
+extension Tracker: UNUserNotificationCenterDelegate {
+    private static let askId = "ask-end"
+    private static let savedId = "auto-saved"
+
+    private func setUpNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let end = UNNotificationAction(identifier: "END", title: "終了して保存", options: [])
+        let cont = UNNotificationAction(identifier: "CONTINUE", title: "まだ運転中", options: [])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: "ASK_END", actions: [end, cont], intentIdentifiers: [], options: [])
+        ])
+    }
+
+    /// 計測を始めるときに通知の許可を求める（初回だけ確認が出る）
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    /// 止まったままか調べ、設定の時間を過ぎたら聞く。答えがなければ自動で保存する
+    private func checkStopped() {
+        guard running else { return }
+        let settings = Store.shared.settings
+        let now = Date()
+        // トンネルで GPS が切れているだけなら、止まった扱いにしない
+        let fixLost = now.timeIntervalSince(lastFixAt) > fixLostSeconds
+        if fixLost && lastFixSpeed >= tunnelSpeed && !askEnd {
+            lastMoveTime = now
+            return
+        }
+        if askEnd {
+            if now >= autoSaveAt { stop(end: stoppedAt, auto: true) }
+            return
+        }
+        guard settings.stopAlertMinutes > 0, !snoozed else { return }
+        if now.timeIntervalSince(lastMoveTime) >= Double(settings.stopAlertMinutes * 60) {
+            stoppedAt = lastMoveTime
+            autoSaveAt = now.addingTimeInterval(Double(settings.autoSaveMinutes * 60))
+            askEnd = true
+            let c = UNMutableNotificationContent()
+            c.title = "運転を終了しましたか？"
+            c.body = "\(Fmt.time(stoppedAt)) から止まっています。答えがなければ \(Fmt.time(autoSaveAt)) に自動で保存します。"
+            c.sound = .default
+            c.categoryIdentifier = "ASK_END"
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: Tracker.askId, content: c, trigger: nil))
+        }
+    }
+
+    /// 「終了して保存」：止まった時刻で終了する
+    func endAtStop() {
+        stop(end: askEnd ? stoppedAt : Date())
+    }
+
+    /// 「まだ運転中」：次に動き出すまでは聞かない
+    func continueDriving() {
+        guard running else { return }
+        snoozed = true
+        clearAsk()
+    }
+
+    private func clearAsk() {
+        askEnd = false
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Tracker.askId])
+        center.removeDeliveredNotifications(withIdentifiers: [Tracker.askId])
+    }
+
+    private func notifySaved(meters: Double, end: Date) {
+        let c = UNMutableNotificationContent()
+        c.title = "走行を自動で保存しました"
+        c.body = String(format: "%.1f km（%@ に終了）", meters / 1000, Fmt.time(end))
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: Tracker.savedId, content: c, trigger: nil))
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let action = response.actionIdentifier
+        DispatchQueue.main.async {
+            if action == "END" { self.endAtStop() }
+            if action == "CONTINUE" { self.continueDriving() }
+            completionHandler()
+        }
+    }
+
+    // アプリを開いているときは、確認は画面のダイアログで出すので通知は出さない
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        if notification.request.identifier == Tracker.askId {
+            completionHandler([])
+        } else {
+            completionHandler([.banner, .sound])
         }
     }
 }

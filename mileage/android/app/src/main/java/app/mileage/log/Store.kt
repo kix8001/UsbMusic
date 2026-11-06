@@ -58,6 +58,10 @@ data class Settings(
     val name: String = "",
     /** 次に計測する走行の区分（計測画面で選ぶ）。基本は業務 */
     val nextCategory: Category = Category.BUSINESS,
+    /** 何分止まっていたら「運転を終了しましたか？」と聞くか（0 = 聞かない） */
+    val stopAlertMinutes: Int = 3,
+    /** 聞いてから何分答えがなければ自動で保存するか */
+    val autoSaveMinutes: Int = 10,
 ) {
     fun rate(c: Category): Double = when (c) {
         Category.COMMUTE -> commuteRate
@@ -106,6 +110,8 @@ object Store {
                     businessRate = s.optDouble("businessRate", 36.0),
                     name = s.optString("name", ""),
                     nextCategory = if (s.has("nextCategory")) Category.of(s.optString("nextCategory")) else Category.BUSINESS,
+                    stopAlertMinutes = s.optInt("stopAlertMinutes", 3),
+                    autoSaveMinutes = s.optInt("autoSaveMinutes", 10),
                 )
             }
         } catch (e: Exception) {
@@ -206,6 +212,7 @@ object Store {
         root.put("settings", JSONObject().apply {
             put("commuteRate", s.commuteRate); put("businessRate", s.businessRate)
             put("name", s.name); put("nextCategory", s.nextCategory.name)
+            put("stopAlertMinutes", s.stopAlertMinutes); put("autoSaveMinutes", s.autoSaveMinutes)
         })
         // 書きかけで落ちても壊れないよう、一時ファイルに書いてから置き換える
         val tmp = File(f.parentFile, "data.json.tmp")

@@ -12,6 +12,12 @@ object Tracking {
         val speedKmh: Float = 0f,
         val accuracy: Float? = null,
         val hasFix: Boolean = false,
+        /** 止まったままなので「運転を終了しましたか？」と聞いているところ */
+        val askEnd: Boolean = false,
+        /** 最後に動いた時刻（終了するときはこの時刻で保存する） */
+        val stoppedAt: Long = 0L,
+        /** 答えがなければこの時刻に自動で保存する */
+        val autoSaveAt: Long = 0L,
     )
 
     internal val mutable = MutableStateFlow(State())

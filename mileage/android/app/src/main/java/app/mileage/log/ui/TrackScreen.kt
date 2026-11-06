@@ -19,6 +19,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,6 +58,7 @@ fun TrackScreen() {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var denied by remember { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
+    var editSettings by remember { mutableStateOf(false) }
 
     LaunchedEffect(s.running) {
         while (s.running) {
@@ -91,7 +96,9 @@ fun TrackScreen() {
         Modifier.fillMaxSize().padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(24.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            IconButton(onClick = { editSettings = true }) { Icon(Icons.Filled.Settings, "設定") }
+        }
         Text(
             if (s.running) "計測中" else "停止中",
             color = if (s.running) MaterialTheme.colorScheme.secondary else Color.Gray,
@@ -145,6 +152,25 @@ fun TrackScreen() {
             SummaryCard("今日", todayKm, Modifier.weight(1f))
             SummaryCard("今月", monthKm, Modifier.weight(1f))
         }
+    }
+
+    if (editSettings) SettingsDialog(settings) { editSettings = false }
+
+    if (s.running && s.askEnd) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("運転を終了しましたか？") },
+            text = {
+                Text("${fmtTime(s.stoppedAt)} から止まっています。答えがなければ ${fmtTime(s.autoSaveAt)} に、" +
+                    "${fmtTime(s.stoppedAt)} に終了したものとして自動で保存します。")
+            },
+            confirmButton = {
+                TextButton(onClick = { TrackingService.endAtStop(context) }) { Text("終了して保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { TrackingService.continueDriving(context) }) { Text("まだ運転中") }
+            },
+        )
     }
 
     if (confirmStop) {

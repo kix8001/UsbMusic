@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,7 +76,7 @@ fun ReportScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("レポート", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            IconButton(onClick = { editSettings = true }) { Icon(Icons.Filled.Settings, "単価・氏名の設定") }
+            IconButton(onClick = { editSettings = true }) { Icon(Icons.Filled.Settings, "設定") }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center) {
@@ -182,17 +184,19 @@ private fun share(context: Context, file: File, mime: String, title: String) {
 }
 
 @Composable
-private fun SettingsDialog(s: Settings, onDismiss: () -> Unit) {
+fun SettingsDialog(s: Settings, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf(s.name) }
     var commute by remember { mutableStateOf(MonthReport.fmtRate(s.commuteRate)) }
     var business by remember { mutableStateOf(MonthReport.fmtRate(s.businessRate)) }
+    var alertMin by remember { mutableIntStateOf(s.stopAlertMinutes) }
+    var autoMin by remember { mutableIntStateOf(s.autoSaveMinutes) }
     val c = parseKm(commute)
     val b = parseKm(business)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("単価・氏名の設定") },
+        title = { Text("設定") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(name, { name = it }, label = { Text("氏名（レポートに載せる）") },
                     singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(commute, { commute = it }, label = { Text("通勤 1km あたり（円）") },
@@ -205,16 +209,40 @@ private fun SettingsDialog(s: Settings, onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                 Text("単価を変えると、過去の月の金額も新しい単価で計算し直されます。",
                     color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+
+                Text("運転終了の確認", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
+                Text("計測中に止まったままこの時間がたつと「運転を終了しましたか？」と聞きます。",
+                    color = Color.Gray, fontSize = 12.sp)
+                MinuteChips(listOf(0, 1, 2, 3, 5, 10, 15), alertMin, { alertMin = it }) { if (it == 0) "聞かない" else "${it}分" }
+                if (alertMin > 0) {
+                    Text("答えがないとき、止まった時刻で自動保存するまで", color = Color.Gray, fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 8.dp))
+                    MinuteChips(listOf(3, 5, 10, 15, 30), autoMin, { autoMin = it }) { "${it}分後" }
+                }
             }
         },
         confirmButton = {
             TextButton(enabled = c != null && b != null, onClick = {
                 Store.updateSettings(Store.settings.value.copy(
                     name = name.trim(), commuteRate = c ?: s.commuteRate, businessRate = b ?: s.businessRate,
+                    stopAlertMinutes = alertMin, autoSaveMinutes = autoMin,
                 ))
                 onDismiss()
             }) { Text("保存") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
     )
+}
+
+/** 分の選択肢をチップで並べる */
+@Composable
+private fun MinuteChips(options: List<Int>, selected: Int, onSelect: (Int) -> Unit, label: (Int) -> String) {
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        options.forEach { m ->
+            FilterChip(selected = selected == m, onClick = { onSelect(m) }, label = { Text(label(m)) })
+        }
+    }
 }

@@ -91,6 +91,10 @@ struct Settings: Codable, Equatable {
     var name: String = ""
     /// 次に計測する走行の区分（計測画面で選ぶ）。基本は業務
     var nextCategory: Category = .business
+    /// 何分止まっていたら「運転を終了しましたか？」と聞くか（0 = 聞かない）
+    var stopAlertMinutes: Int = 3
+    /// 聞いてから何分答えがなければ自動で保存するか
+    var autoSaveMinutes: Int = 10
 
     init() {}
 
@@ -101,6 +105,8 @@ struct Settings: Codable, Equatable {
         businessRate = try c.decodeIfPresent(Double.self, forKey: .businessRate) ?? 36
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         nextCategory = (try? c.decodeIfPresent(Category.self, forKey: .nextCategory)) ?? .business
+        stopAlertMinutes = try c.decodeIfPresent(Int.self, forKey: .stopAlertMinutes) ?? 3
+        autoSaveMinutes = try c.decodeIfPresent(Int.self, forKey: .autoSaveMinutes) ?? 10
     }
 
     func rate(_ c: Category) -> Double {

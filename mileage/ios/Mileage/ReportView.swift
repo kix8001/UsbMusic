@@ -135,12 +135,14 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 
-private struct SettingsSheet: View {
+struct SettingsSheet: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var commute = ""
     @State private var business = ""
+    @State private var alertMin = 3
+    @State private var autoMin = 10
 
     var body: some View {
         let c = Fmt.parseKm(commute)
@@ -166,8 +168,24 @@ private struct SettingsSheet: View {
                 } footer: {
                     Text("単価を変えると、過去の月の金額も新しい単価で計算し直されます。")
                 }
+                Section {
+                    Picker("確認するまで", selection: $alertMin) {
+                        ForEach([0, 1, 2, 3, 5, 10, 15], id: \.self) { m in
+                            Text(m == 0 ? "聞かない" : "\(m)分").tag(m)
+                        }
+                    }
+                    if alertMin > 0 {
+                        Picker("答えがないとき自動保存", selection: $autoMin) {
+                            ForEach([3, 5, 10, 15, 30], id: \.self) { m in Text("\(m)分後").tag(m) }
+                        }
+                    }
+                } header: {
+                    Text("運転終了の確認")
+                } footer: {
+                    Text("計測中に止まったままこの時間がたつと「運転を終了しましたか？」と聞きます。答えがなければ、止まった時刻で終了したものとして自動で保存します。")
+                }
             }
-            .navigationTitle("単価・氏名の設定")
+            .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
@@ -177,6 +195,8 @@ private struct SettingsSheet: View {
                         s.name = name.trimmingCharacters(in: .whitespaces)
                         s.commuteRate = c ?? s.commuteRate
                         s.businessRate = b ?? s.businessRate
+                        s.stopAlertMinutes = alertMin
+                        s.autoSaveMinutes = autoMin
                         store.settings = s
                         dismiss()
                     }
@@ -187,6 +207,8 @@ private struct SettingsSheet: View {
                 name = store.settings.name
                 commute = MonthReport.fmtRate(store.settings.commuteRate)
                 business = MonthReport.fmtRate(store.settings.businessRate)
+                alertMin = store.settings.stopAlertMinutes
+                autoMin = store.settings.autoSaveMinutes
             }
         }
     }

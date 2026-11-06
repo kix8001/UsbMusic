@@ -4,6 +4,7 @@ struct TrackView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var tracker: Tracker
     @State private var confirmStop = false
+    @State private var editSettings = false
 
     var body: some View {
         let cal = Calendar.current
@@ -13,7 +14,12 @@ struct TrackView: View {
         let monthKm = store.trips.filter { cal.monthKey($0.start) == month }.reduce(0) { $0 + $1.km } + live
 
         VStack(spacing: 8) {
-            Spacer().frame(height: 24)
+            HStack {
+                Spacer()
+                Button { editSettings = true } label: {
+                    Image(systemName: "gearshape").font(.title3)
+                }
+            }
             Text(tracker.running ? "計測中" : "停止中")
                 .font(.headline)
                 .foregroundStyle(tracker.running ? Color.green : Color.secondary)
@@ -52,13 +58,26 @@ struct TrackView: View {
                 .padding(.bottom, 12)
 
             Button {
-                if tracker.running { confirmStop = true } else { tracker.start() }
+                if tracker.running {
+                    confirmStop = true
+                } else {
+                    tracker.requestNotificationPermission()
+                    tracker.start()
+                }
             } label: {
                 Text(tracker.running ? "停止" : "開始")
                     .font(.system(size: 36, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 180, height: 180)
                     .background(Circle().fill(tracker.running ? Color.red : Color.blue))
+            }
+            .alert("運転を終了しましたか？", isPresented: Binding(
+                get: { tracker.running && tracker.askEnd }, set: { _ in }
+            )) {
+                Button("終了して保存") { tracker.endAtStop() }
+                Button("まだ運転中", role: .cancel) { tracker.continueDriving() }
+            } message: {
+                Text("\(Fmt.time(tracker.stoppedAt)) から止まっています。答えがなければ \(Fmt.time(tracker.autoSaveAt)) に、\(Fmt.time(tracker.stoppedAt)) に終了したものとして自動で保存します。")
             }
 
             Spacer()
@@ -69,6 +88,7 @@ struct TrackView: View {
             }
         }
         .padding(20)
+        .sheet(isPresented: $editSettings) { SettingsSheet() }
         .confirmationDialog(
             "計測を終了しますか？",
             isPresented: $confirmStop,

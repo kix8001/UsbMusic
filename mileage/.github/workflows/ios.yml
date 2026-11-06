@@ -1,0 +1,51 @@
+name: 走行距離ログ iOS
+
+on:
+  push:
+    branches: [ '**' ]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Apple シリコン版の macOS 環境は混んでいて始まらないことがあるので Intel 版を使う
+    runs-on: macos-15-intel
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # 署名なしでビルドする。インストールするときに Sideloadly / Xcode などで自分の Apple ID で署名する
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project Mileage.xcodeproj -scheme Mileage -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log
+
+      - name: Report errors
+        if: failure()
+        run: |
+          grep -E "error:" build.log | sort -u | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p out/Payload
+          cp -R build/Build/Products/Release-iphoneos/Mileage.app out/Payload/
+          cd out && zip -qry Mileage-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mileage-ios-unsigned-ipa
+          path: ios/out/Mileage-unsigned.ipa

@@ -143,7 +143,7 @@ internal class DeckState {
         scope.drawIntoCanvas { cv ->
             val nc = cv.nativeCanvas
             val w = scope.size.width; val h = scope.size.height
-            p.reset(); p.isAntiAlias = true
+            resetP()
             p.color = c(0xFF0B0B0C); nc.drawRect(0f, 0f, w, h, p)
             val s = min(w / LW, h / LH)
             nc.save()
@@ -156,22 +156,37 @@ internal class DeckState {
 
     // ---------------- 道具 ----------------
 
+    /**
+     * 筆を初期状態に戻す。Paint.reset() だけでは文字の揃え方や字間が前の設定のまま残る端末があるので、
+     * ここで明示的に左揃え・字間0に戻す
+     */
+    private fun resetP() {
+        p.reset()
+        p.isAntiAlias = true
+        p.style = Paint.Style.FILL
+        p.shader = null
+        p.clearShadowLayer()
+        p.textAlign = Paint.Align.LEFT
+        p.letterSpacing = 0f
+        p.textScaleX = 1f
+    }
+
     private fun rr(x: Float, y: Float, w: Float, h: Float, r: Float): Path {
         path.reset(); path.addRoundRect(x, y, x + w, y + h, r, r, Path.Direction.CW); return path
     }
 
-    private fun fillPaint(color: Int): Paint { p.reset(); p.isAntiAlias = true; p.style = Paint.Style.FILL; p.color = color; return p }
-    private fun strokePaint(color: Int, width: Float): Paint { p.reset(); p.isAntiAlias = true; p.style = Paint.Style.STROKE; p.color = color; p.strokeWidth = width; return p }
+    private fun fillPaint(color: Int): Paint { resetP(); p.style = Paint.Style.FILL; p.color = color; return p }
+    private fun strokePaint(color: Int, width: Float): Paint { resetP(); p.style = Paint.Style.STROKE; p.color = color; p.strokeWidth = width; return p }
 
     private fun vGrad(y0: Float, y1: Float, vararg colors: Int): Paint {
-        p.reset(); p.isAntiAlias = true
+        resetP()
         p.shader = LinearGradient(0f, y0, 0f, y1, colors, null, Shader.TileMode.CLAMP)
         return p
     }
 
     private fun brushed(cv: Canvas, x: Float, y: Float, w: Float, h: Float, colors: IntArray, r: Float, alpha: Float) {
         cv.save(); cv.clipPath(rr(x, y, w, h, r))
-        p.reset(); p.isAntiAlias = true
+        resetP()
         p.shader = LinearGradient(0f, y, 0f, y + h, colors, null, Shader.TileMode.CLAMP)
         cv.drawRect(x, y, x + w, y + h, p)
         p.reset(); p.shader = hairShader; p.alpha = (alpha * 255).toInt()
@@ -187,7 +202,7 @@ internal class DeckState {
     }
 
     private fun screw(cv: Canvas, x: Float, y: Float, r: Float, ang: Float = 0.5f) {
-        p.reset(); p.isAntiAlias = true
+        resetP()
         p.shader = RadialGradient(x - r * 0.3f, y - r * 0.3f, r * 1.2f, intArrayOf(c(0xFFF4F4F4), c(0xFFA9ADB2), c(0xFF5D6166)), floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
         cv.drawCircle(x, y, r, p)
         cv.drawCircle(x, y, r, strokePaint(c(0x80000000), 1f))
@@ -208,7 +223,7 @@ internal class DeckState {
             lp.color = if (k % 2 == 1) c(0x59FFFFFF) else c(0x73000000)
             cv.drawLine(x + cos(a) * r * 0.86f, y + sin(a) * r * 0.86f, x + cos(a) * r, y + sin(a) * r, lp)
         }
-        p.reset(); p.isAntiAlias = true
+        resetP()
         p.shader = LinearGradient(x - r, y - r, x + r, y + r, intArrayOf(c(0xFFF2F3F4), c(0xFF9DA2A8), c(0xFF5F646A)), null, Shader.TileMode.CLAMP)
         cv.drawCircle(x, y, r * 0.82f, p)
         val rp = strokePaint(c(0x1FFFFFFF), 0.6f)
@@ -218,7 +233,7 @@ internal class DeckState {
     }
 
     private fun text(cv: Canvas, t: String, x: Float, y: Float, size: Float, color: Int, align: Paint.Align = Paint.Align.LEFT, face: Typeface? = condensed, spacing: Float = 0.12f) {
-        p.reset(); p.isAntiAlias = true
+        resetP()
         p.typeface = face; p.textSize = size; p.color = color; p.textAlign = align; p.letterSpacing = spacing
         val fm = p.fontMetrics
         cv.drawText(t, x, y - (fm.ascent + fm.descent) / 2f, p)
@@ -259,7 +274,7 @@ internal class DeckState {
     }
 
     private fun led(cv: Canvas, x: Float, y: Float, r: Float, on: Boolean, color: Int) {
-        p.reset(); p.isAntiAlias = true
+        resetP()
         p.shader = RadialGradient(x - r * 0.3f, y - r * 0.3f, r * 1.3f,
             intArrayOf(if (on) c(0xFFFFFFFF) else c(0xFF555555), if (on) color else c(0xFF2A2A2A), if (on) color else c(0xFF151515)),
             floatArrayOf(0f, 0.35f, 1f), Shader.TileMode.CLAMP)
@@ -294,7 +309,7 @@ internal class DeckState {
             cv.drawRect(wx, wy, wx + ww, wy + wh, fillPaint(c(0xFF0B0B0D)))
         }
         for ((px, r) in arrayOf(hx1 to rL, hx2 to rR)) {
-            p.reset(); p.isAntiAlias = true
+            resetP()
             p.shader = RadialGradient(px, hy, r, intArrayOf(c(0xFF5A3A26), c(0xFF3E2719), c(0xFF2A1A10)), floatArrayOf(min(rh / r, 0.8f), 0.85f, 1f), Shader.TileMode.CLAMP)
             cv.drawCircle(px, hy, r, p)
             val ring = strokePaint(c(0x0FFFDCB4), 0.7f)
@@ -319,13 +334,13 @@ internal class DeckState {
         band(cv, st, lx, sy0, lw, sy1 - sy0, h)
         val rule = strokePaint(st.rule, 0.8f)
         for (yy in floatArrayOf(h * 0.155f, h * 0.235f)) cv.drawLine(lx + w * 0.1f, yy, lx + lw - w * 0.04f, yy, rule)
-        p.reset(); p.isAntiAlias = true; p.typeface = condensed; p.textSize = h * 0.15f; p.color = st.side
+        resetP(); p.typeface = condensed; p.textSize = h * 0.15f; p.color = st.side
         cv.drawText("A", lx + w * 0.025f, h * 0.235f, p)
         val hand = HandFont.typeface ?: Typeface.DEFAULT
         val maxW = lw - w * 0.15f
         fitText(cv, title.ifBlank { "　" }, lx + w * 0.11f, h * 0.145f, h * 0.095f, maxW, hand, st.ink)
         fitText(cv, artist, lx + w * 0.11f, h * 0.225f, h * 0.07f, maxW, hand, st.ink)
-        p.reset(); p.isAntiAlias = true; p.typeface = condensed; p.textSize = h * 0.05f; p.color = st.brandColor; p.textAlign = Paint.Align.RIGHT
+        resetP(); p.typeface = condensed; p.textSize = h * 0.05f; p.color = st.brandColor; p.textAlign = Paint.Align.RIGHT
         p.letterSpacing = 0.08f
         cv.drawText(st.brand, lx + lw - w * 0.03f, sy1 - h * 0.025f, p)
         cv.restore()
@@ -339,7 +354,7 @@ internal class DeckState {
         // ハブ（白い歯車）
         for ((px, ang) in arrayOf(hx1 to aL, hx2 to aR)) {
             cv.save(); cv.translate(px, hy); cv.rotate(ang * 180f / PI_F)
-            p.reset(); p.isAntiAlias = true
+            resetP()
             p.shader = RadialGradient(-rh * 0.3f, -rh * 0.3f, rh * 1.3f, c(0xFFFFFFFF), c(0xFFCFCFCF), Shader.TileMode.CLAMP)
             cv.drawCircle(0f, 0f, rh, p)
             cv.drawCircle(0f, 0f, rh * 0.62f, fillPaint(c(0xFF151515)))
@@ -361,7 +376,7 @@ internal class DeckState {
         cv.drawRect(w * 0.45f, h * 0.86f, w * 0.55f, h * 0.95f, hole)
         for ((xx, yy) in arrayOf(0.05f to 0.08f, 0.95f to 0.08f, 0.05f to 0.92f, 0.95f to 0.92f, 0.5f to 0.79f)) screw(cv, w * xx, h * yy, w * 0.012f, 0.6f)
         // 映り込み
-        p.reset(); p.isAntiAlias = true
+        resetP()
         p.shader = LinearGradient(0f, 0f, w, h, intArrayOf(c(0x1AFFFFFF), c(0x05FFFFFF), 0), floatArrayOf(0f, 0.35f, 0.5f), Shader.TileMode.CLAMP)
         cv.drawPath(rr(0f, 0f, w, h, w * 0.025f), p)
         cv.restore()
@@ -429,7 +444,7 @@ internal class DeckState {
     /** 入りきらない文字は小さくし、それでも長ければ末尾を「…」にする */
     private fun fitText(cv: Canvas, t: String, x: Float, y: Float, size: Float, maxW: Float, face: Typeface, color: Int) {
         if (t.isEmpty()) return
-        p.reset(); p.isAntiAlias = true; p.typeface = face; p.textSize = size; p.color = color
+        resetP(); p.typeface = face; p.textSize = size; p.color = color
         var w = p.measureText(t)
         if (w > maxW) { p.textSize = size * maxOf(0.72f, maxW / w); w = p.measureText(t) }
         var s = t
@@ -459,7 +474,7 @@ internal class DeckState {
             val off = frac * (h - 10)
             text(cv, d.toString(), cx + cw / 2, y + h / 2 - off, h * 0.62f, c(0xFF151515), Paint.Align.CENTER, condensed, 0f)
             text(cv, ((d + 1) % 10).toString(), cx + cw / 2, y + h / 2 - off + (h - 10), h * 0.62f, c(0xFF151515), Paint.Align.CENTER, condensed, 0f)
-            p.reset(); p.isAntiAlias = true
+            resetP()
             p.shader = LinearGradient(0f, y + 5, 0f, y + h - 5, intArrayOf(c(0x8C000000), 0, 0, c(0x8C000000)), floatArrayOf(0f, 0.3f, 0.7f, 1f), Shader.TileMode.CLAMP)
             cv.drawRect(cx, y, cx + cw, y + h, p)
             cv.restore()
@@ -536,7 +551,7 @@ internal class DeckState {
         p.clearShadowLayer()
         var ix = fx + 20
         for ((t, on) in arrayOf("DOLBY B NR" to true, "NORMAL" to false, "CrO2" to true, "METAL" to false, "PLAY" to playing, "REC" to false)) {
-            p.reset(); p.isAntiAlias = true; p.typeface = dot; p.textSize = 12f; p.color = if (on) fl else flDim
+            resetP(); p.typeface = dot; p.textSize = 12f; p.color = if (on) fl else flDim
             if (on) p.setShadowLayer(6f, 0f, 0f, fl)
             val fm = p.fontMetrics
             cv.drawText(t, ix, fy + 126 - (fm.ascent + fm.descent) / 2f, p)

@@ -94,10 +94,10 @@ private val TapeStyles = listOf(
         intArrayOf(c(0xFF5FC8FF), c(0xFFB7E9FF)), c(0xFF222428), c(0xFF1D4F7A), c(0x40303840), "mTunes  CLEAR 90", c(0xFF1D4F7A)),
     // 黒と銀（ハイポジション）
     TapeStyle(intArrayOf(c(0xFF2A2A2E), c(0xFF0E0E10)), false, intArrayOf(c(0xFF1C1C1F), c(0xFF101012)), BAND_GRADIENT,
-        intArrayOf(c(0xFFE6E9ED), c(0xFFB0B4BA), c(0xFF5B6068), c(0xFFB0B4BA)), c(0xFFF2D27A), c(0xFFF2D27A), c(0x55F2D27A), "HIGH POSITION  CrO2  C-90", c(0xFF1C1C1F)),
+        intArrayOf(c(0xFFE6E9ED), c(0xFFB0B4BA), c(0xFF5B6068), c(0xFFB0B4BA)), c(0xFFF2D27A), c(0xFFF2D27A), c(0x55F2D27A), "CrO2  C-90", c(0xFF1C1C1F)),
     // メタル（銀ラベルに赤と黒）
     TapeStyle(intArrayOf(c(0xFF5B5F66), c(0xFF34373C)), false, intArrayOf(c(0xFFD7DADF), c(0xFFA9AEB5)), BAND_STRIPES,
-        intArrayOf(c(0xFFC8281E), c(0xFF1C1C1F)), c(0xFF1C1C1F), c(0xFFC8281E), c(0x40000000), "METAL  TYPE IV  C-60", c(0xE6FFFFFF)),
+        intArrayOf(c(0xFFC8281E), c(0xFF1C1C1F)), c(0xFF1C1C1F), c(0xFFC8281E), c(0x40000000), "METAL  C-60", c(0xE6FFFFFF)),
     // パステルピンクの斜めじま
     TapeStyle(intArrayOf(c(0xFFF2F2F2), c(0xFFD8D8D8)), false, intArrayOf(c(0xFFFFE6EF), c(0xFFFFD0E0)), BAND_DIAGONAL,
         intArrayOf(c(0xFFFF8FB8), c(0xFFFFF4F8)), c(0xFF8A1A4A), c(0xFF8A1A4A), c(0x408A1A4A), "mTunes  C-46", c(0xFF8A1A4A)),

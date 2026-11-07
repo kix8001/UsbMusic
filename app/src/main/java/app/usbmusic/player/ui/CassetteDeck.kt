@@ -61,11 +61,67 @@ private val hairBitmap: Bitmap by lazy {
     bmp
 }
 
+// ---------------- カセットテープの種類 ----------------
+
+private const val BAND_STRIPES = 0   // 横じま
+private const val BAND_GRADIENT = 1  // なめらかな色の移り変わり
+private const val BAND_DIAGONAL = 2  // 斜めじま
+private const val BAND_NONE = 3      // 帯なし（罫線と赤い線だけの無地ラベル）
+private const val BAND_ZIGZAG = 4    // 80年代風のギザギザ模様
+
+private class TapeStyle(
+    val shell: IntArray,          // 本体の色（上・下）
+    val clear: Boolean = false,   // 透明な本体（中のテープが見える）
+    val paper: IntArray,          // ラベルの地の色（上・下）
+    val band: Int,
+    val bandColors: IntArray,
+    val ink: Int,                 // 曲名・アーティスト名の色
+    val side: Int,                // 「A」の色
+    val rule: Int,                // 罫線の色
+    val brand: String,
+    val brandColor: Int,
+)
+
+private val TapeStyles = listOf(
+    // 夕焼けのしま（見本のテープ）
+    TapeStyle(intArrayOf(c(0xFF3A3C42), c(0xFF1E1F23)), false, intArrayOf(c(0xFFF4F0E6), c(0xFFE2DCCD)), BAND_STRIPES,
+        intArrayOf(c(0xFFE85A2A), c(0xFFF2A33A), c(0xFFF7D548)), c(0xFF1D3F8A), c(0xFF2B2622), c(0x403C3228), "mTunes  C-60", c(0xD9FFFFFF)),
+    // 海の青のしま
+    TapeStyle(intArrayOf(c(0xFF3A3C42), c(0xFF1E1F23)), false, intArrayOf(c(0xFFF4F0E6), c(0xFFE2DCCD)), BAND_STRIPES,
+        intArrayOf(c(0xFF2A6FD6), c(0xFF4FB0FF), c(0xFFA8E4FF)), c(0xFFA3162A), c(0xFF2B2622), c(0x403C3228), "mTunes  C-60", c(0xD9FFFFFF)),
+    // 透明ボディ
+    TapeStyle(intArrayOf(c(0x99E8EEF2), c(0x80B9C6CE)), true, intArrayOf(c(0xFFFFFFFF), c(0xFFEDEDED)), BAND_GRADIENT,
+        intArrayOf(c(0xFF5FC8FF), c(0xFFB7E9FF)), c(0xFF222428), c(0xFF1D4F7A), c(0x40303840), "mTunes  CLEAR 90", c(0xFF1D4F7A)),
+    // 黒と銀（ハイポジション）
+    TapeStyle(intArrayOf(c(0xFF2A2A2E), c(0xFF0E0E10)), false, intArrayOf(c(0xFF1C1C1F), c(0xFF101012)), BAND_GRADIENT,
+        intArrayOf(c(0xFFE6E9ED), c(0xFFB0B4BA), c(0xFF5B6068), c(0xFFB0B4BA)), c(0xFFF2D27A), c(0xFFF2D27A), c(0x55F2D27A), "HIGH POSITION  CrO2  C-90", c(0xFF1C1C1F)),
+    // メタル（銀ラベルに赤と黒）
+    TapeStyle(intArrayOf(c(0xFF5B5F66), c(0xFF34373C)), false, intArrayOf(c(0xFFD7DADF), c(0xFFA9AEB5)), BAND_STRIPES,
+        intArrayOf(c(0xFFC8281E), c(0xFF1C1C1F)), c(0xFF1C1C1F), c(0xFFC8281E), c(0x40000000), "METAL  TYPE IV  C-60", c(0xE6FFFFFF)),
+    // パステルピンクの斜めじま
+    TapeStyle(intArrayOf(c(0xFFF2F2F2), c(0xFFD8D8D8)), false, intArrayOf(c(0xFFFFE6EF), c(0xFFFFD0E0)), BAND_DIAGONAL,
+        intArrayOf(c(0xFFFF8FB8), c(0xFFFFF4F8)), c(0xFF8A1A4A), c(0xFF8A1A4A), c(0x408A1A4A), "mTunes  C-46", c(0xFF8A1A4A)),
+    // 虹色のしま
+    TapeStyle(intArrayOf(c(0xFFDCDCDC), c(0xFFB9B9B9)), false, intArrayOf(c(0xFFF4F0E6), c(0xFFE2DCCD)), BAND_STRIPES,
+        intArrayOf(c(0xFFFF5FA0), c(0xFFFFA04A), c(0xFFFFE14A), c(0xFF5FE08A), c(0xFF4FB0FF)), c(0xFF7A1A50), c(0xFF2B2622), c(0x403C3228), "mTunes  C-60", c(0xE6FFFFFF)),
+    // 無地のラベル（罫線と赤い線）
+    TapeStyle(intArrayOf(c(0xFF2B2B2E), c(0xFF141416)), false, intArrayOf(c(0xFFFFFFFF), c(0xFFF0F0F0)), BAND_NONE,
+        intArrayOf(c(0xFFD8322A)), c(0xFF1D3F8A), c(0xFFD8322A), c(0x553C5A9A), "mTunes  C-60", c(0xFF8A8A8A)),
+    // 80年代のネオン模様
+    TapeStyle(intArrayOf(c(0xFF151517), c(0xFF0A0A0B)), false, intArrayOf(c(0xFF141416), c(0xFF0C0C0E)), BAND_ZIGZAG,
+        intArrayOf(c(0xFFFF3FA4), c(0xFF3FE0FF), c(0xFFFFE14A)), c(0xFFF5F5F5), c(0xFFFF3FA4), c(0x40FFFFFF), "mTunes  C-60", c(0xFFFF3FA4)),
+    // クラフト紙
+    TapeStyle(intArrayOf(c(0xFFE9E1CF), c(0xFFCDBF9F)), false, intArrayOf(c(0xFFC9A87A), c(0xFFB18E5E)), BAND_STRIPES,
+        intArrayOf(c(0xFF6B3E1E), c(0xFFC9A87A), c(0xFF2F5E3A)), c(0xFF2B1A0E), c(0xFF2B1A0E), c(0x402B1A0E), "mTunes  C-90", c(0xFFF4F0E6)),
+)
+
 internal class DeckState {
     private var aL = 0f
     private var aR = 0f
     private var count = 0f
     private var lastTitle: String? = null
+    private var styleIndex = -1
+    private val rnd = kotlin.random.Random(System.nanoTime())
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val path2 = Path()
@@ -77,7 +133,13 @@ internal class DeckState {
         scope: DrawScope, dt: Float, playing: Boolean, progress: Float,
         levelL: Float, levelR: Float, peakL: Float, peakR: Float, title: String, artist: String,
     ) {
-        if (title != lastTitle) { lastTitle = title; count = 0f }
+        if (title != lastTitle) {
+            // 曲が変わったら、前と違う種類のカセットをランダムに選ぶ
+            lastTitle = title; count = 0f
+            var next = rnd.nextInt(TapeStyles.size)
+            if (next == styleIndex) next = (next + 1 + rnd.nextInt(TapeStyles.size - 1)) % TapeStyles.size
+            styleIndex = next
+        }
         scope.drawIntoCanvas { cv ->
             val nc = cv.nativeCanvas
             val w = scope.size.width; val h = scope.size.height
@@ -210,9 +272,10 @@ internal class DeckState {
 
     /** 戻り値は左右の巻いたテープの半径（カセットの幅を1とした値） */
     private fun cassette(cv: Canvas, x: Float, y: Float, w: Float, prog: Float, title: String, artist: String): Pair<Float, Float> {
+        val st = TapeStyles[styleIndex.coerceIn(0, TapeStyles.size - 1)]
         val h = w * 0.636f
         cv.save(); cv.translate(x, y)
-        val body = vGrad(0f, h, c(0xFF3A3C42), c(0xFF1E1F23))
+        val body = vGrad(0f, h, st.shell[0], st.shell[1])
         body.setShadowLayer(w * 0.03f, 0f, w * 0.012f, c(0x99000000))
         cv.drawPath(rr(0f, 0f, w, h, w * 0.025f), body)
         p.clearShadowLayer()
@@ -223,9 +286,13 @@ internal class DeckState {
         val rR = sqrt(rh * rh + prog * (rmax * rmax - rh * rh))
         val wx = w * 0.23f; val wy = h * 0.335f; val ww = w * 0.54f; val wh = h * 0.27f
 
-        // 窓の中：巻かれたテープ
-        cv.save(); cv.clipPath(rr(wx, wy, ww, wh, h * 0.035f))
-        cv.drawRect(wx, wy, wx + ww, wy + wh, fillPaint(c(0xFF0B0B0D)))
+        // 窓の中：巻かれたテープ（透明ボディは本体全体から見える）
+        cv.save()
+        if (st.clear) cv.clipPath(rr(w * 0.02f, w * 0.02f, w - w * 0.04f, h - w * 0.04f, w * 0.02f))
+        else {
+            cv.clipPath(rr(wx, wy, ww, wh, h * 0.035f))
+            cv.drawRect(wx, wy, wx + ww, wy + wh, fillPaint(c(0xFF0B0B0D)))
+        }
         for ((px, r) in arrayOf(hx1 to rL, hx2 to rR)) {
             p.reset(); p.isAntiAlias = true
             p.shader = RadialGradient(px, hy, r, intArrayOf(c(0xFF5A3A26), c(0xFF3E2719), c(0xFF2A1A10)), floatArrayOf(min(rh / r, 0.8f), 0.85f, 1f), Shader.TileMode.CLAMP)
@@ -247,20 +314,20 @@ internal class DeckState {
         path2.addRoundRect(lx, ly, lx + lw, ly + lh, w * 0.015f, w * 0.015f, Path.Direction.CW)
         path2.addRoundRect(wx - 1, wy - 1, wx + ww + 1, wy + wh + 1, h * 0.04f, h * 0.04f, Path.Direction.CW)
         cv.save(); cv.clipPath(path2)
-        cv.drawRect(lx, ly, lx + lw, ly + lh, vGrad(ly, ly + lh, c(0xFFF4F0E6), c(0xFFE2DCCD)))
-        val stripes = intArrayOf(c(0xFFE85A2A), c(0xFFF2A33A), c(0xFFF7D548))
-        val sy0 = h * 0.29f; val sy1 = h * 0.655f; val sh = (sy1 - sy0) / stripes.size
-        for (i in stripes.indices) cv.drawRect(lx, sy0 + i * sh, lx + lw, sy0 + (i + 1) * sh + 0.5f, fillPaint(stripes[i]))
-        val rule = strokePaint(c(0x403C3228), 0.8f)
+        cv.drawRect(lx, ly, lx + lw, ly + lh, vGrad(ly, ly + lh, st.paper[0], st.paper[1]))
+        val sy0 = h * 0.29f; val sy1 = h * 0.655f
+        band(cv, st, lx, sy0, lw, sy1 - sy0, h)
+        val rule = strokePaint(st.rule, 0.8f)
         for (yy in floatArrayOf(h * 0.155f, h * 0.235f)) cv.drawLine(lx + w * 0.1f, yy, lx + lw - w * 0.04f, yy, rule)
-        p.reset(); p.isAntiAlias = true; p.typeface = condensed; p.textSize = h * 0.15f; p.color = c(0xFF2B2622)
+        p.reset(); p.isAntiAlias = true; p.typeface = condensed; p.textSize = h * 0.15f; p.color = st.side
         cv.drawText("A", lx + w * 0.025f, h * 0.235f, p)
         val hand = HandFont.typeface ?: Typeface.DEFAULT
         val maxW = lw - w * 0.15f
-        fitText(cv, title.ifBlank { "　" }, lx + w * 0.11f, h * 0.145f, h * 0.095f, maxW, hand, c(0xFF1D3F8A))
-        fitText(cv, artist, lx + w * 0.11f, h * 0.225f, h * 0.07f, maxW, hand, c(0xFF1D3F8A))
-        p.reset(); p.isAntiAlias = true; p.typeface = condensed; p.textSize = h * 0.05f; p.color = c(0xD9FFFFFF); p.textAlign = Paint.Align.RIGHT
-        cv.drawText("mTunes  C-60", lx + lw - w * 0.03f, sy1 - h * 0.025f, p)
+        fitText(cv, title.ifBlank { "　" }, lx + w * 0.11f, h * 0.145f, h * 0.095f, maxW, hand, st.ink)
+        fitText(cv, artist, lx + w * 0.11f, h * 0.225f, h * 0.07f, maxW, hand, st.ink)
+        p.reset(); p.isAntiAlias = true; p.typeface = condensed; p.textSize = h * 0.05f; p.color = st.brandColor; p.textAlign = Paint.Align.RIGHT
+        p.letterSpacing = 0.08f
+        cv.drawText(st.brand, lx + lw - w * 0.03f, sy1 - h * 0.025f, p)
         cv.restore()
 
         // 窓のふちと目盛り
@@ -299,6 +366,64 @@ internal class DeckState {
         cv.drawPath(rr(0f, 0f, w, h, w * 0.025f), p)
         cv.restore()
         return (rL / w) to (rR / w)
+    }
+
+    /** ラベルの帯（窓のまわりの色の部分） */
+    private fun band(cv: Canvas, st: TapeStyle, x: Float, y: Float, w: Float, h: Float, ch: Float) {
+        val cols = st.bandColors
+        when (st.band) {
+            BAND_STRIPES -> {
+                val sh = h / cols.size
+                for (i in cols.indices) cv.drawRect(x, y + i * sh, x + w, y + (i + 1) * sh + 0.5f, fillPaint(cols[i]))
+            }
+            BAND_GRADIENT -> {
+                p.reset(); p.shader = LinearGradient(0f, y, 0f, y + h, cols, null, Shader.TileMode.CLAMP)
+                cv.drawRect(x, y, x + w, y + h, p)
+            }
+            BAND_DIAGONAL -> {
+                cv.drawRect(x, y, x + w, y + h, fillPaint(cols[1]))
+                cv.save(); cv.clipRect(x, y, x + w, y + h)
+                val sp = h * 0.32f
+                var xx = x - h
+                val fp = fillPaint(cols[0])
+                while (xx < x + w) {
+                    path2.reset(); path2.fillType = Path.FillType.WINDING
+                    path2.moveTo(xx, y + h); path2.lineTo(xx + sp * 0.5f, y + h); path2.lineTo(xx + sp * 0.5f + h, y); path2.lineTo(xx + h, y); path2.close()
+                    cv.drawPath(path2, fp)
+                    xx += sp
+                }
+                cv.restore()
+            }
+            BAND_NONE -> {
+                // 無地：罫線を増やし、上に赤い線を1本
+                val rl = strokePaint(st.rule, 0.8f)
+                var yy = y + h * 0.2f
+                while (yy < y + h) { cv.drawLine(x + w * 0.03f, yy, x + w * 0.97f, yy, rl); yy += h * 0.2f }
+                cv.drawRect(x, y, x + w, y + ch * 0.012f, fillPaint(cols[0]))
+            }
+            BAND_ZIGZAG -> {
+                cv.drawRect(x, y, x + w, y + h, fillPaint(c(0xFF0C0C0E)))
+                cv.save(); cv.clipRect(x, y, x + w, y + h)
+                for (i in cols.indices) {
+                    val zp = strokePaint(cols[i], ch * 0.022f); zp.strokeJoin = Paint.Join.MITER
+                    path2.reset(); path2.fillType = Path.FillType.WINDING
+                    val yy = y + h * (0.2f + i * 0.3f); val amp = h * 0.09f; val step = w * 0.035f
+                    var xx = x - step
+                    path2.moveTo(xx, yy)
+                    var up = true
+                    while (xx < x + w + step) { xx += step; path2.lineTo(xx, if (up) yy - amp else yy + amp); up = !up }
+                    cv.drawPath(path2, zp)
+                }
+                // 小さな三角と点を散らす
+                val r2 = kotlin.random.Random(5)
+                repeat(14) {
+                    val tx = x + r2.nextFloat() * w; val ty = y + r2.nextFloat() * h; val ts = h * 0.07f
+                    path2.reset(); path2.moveTo(tx, ty - ts); path2.lineTo(tx + ts, ty + ts); path2.lineTo(tx - ts, ty + ts); path2.close()
+                    cv.drawPath(path2, fillPaint(cols[it % cols.size]))
+                }
+                cv.restore()
+            }
+        }
     }
 
     /** 入りきらない文字は小さくし、それでも長ければ末尾を「…」にする */

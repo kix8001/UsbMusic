@@ -235,6 +235,7 @@ private fun PlayerPanel(
                 timeText = { fmtTime(conn.position) },
                 title = track.title,
                 artist = track.displayArtist,
+                progress = { if (conn.duration > 0) conn.position.toFloat() / conn.duration else 0f },
             )
         }
     }

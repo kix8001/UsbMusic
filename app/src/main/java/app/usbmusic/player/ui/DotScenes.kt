@@ -23,6 +23,7 @@ import kotlin.random.Random
  *
  * 160×70 ドットの升目に色番号を置いて絵を描き、最後に丸い点として画面に並べる。
  * 色番号：0=消灯 1=暗い 2=ふつう 3=明るい 4=緑（曲名） 5=琥珀 6=赤
+ *         7=ピンク 8=紫 9=黄 10=オレンジ 11=青 12=白 13=暗いピンク 14=暗い紫 15=暗い緑 16=暗い青 17=暗い黄
  * 画面の割り振り：0〜7段目＝シーン名と小さなスペクトラム、9〜55段目＝絵、56〜69段目＝曲名と再生時間
  */
 
@@ -711,9 +712,155 @@ private class AquaScene : DotScene("AQUA") {
     }
 }
 
+/** 明るい色 → 同じ系統の暗い色 */
+private fun dimOf(c: Int): Int = when (c) {
+    2 -> 1; 3 -> 2; 4 -> 15; 5 -> 17; 6 -> 13; 7 -> 13; 8 -> 14; 9 -> 17; 10 -> 17; 11 -> 16; 12 -> 3
+    else -> c
+}
+private val Vivid = intArrayOf(7, 9, 4, 2, 10, 8, 6, 11, 12)
+
+/** 花火：夜の川べりに上がる花火。火の粉は重さで落ち、川面に映る */
+private class FireworksScene : DotScene("HANABI") {
+    private val rnd = Random(11)
+    private class Shell(val x: Float, var y: Float, var vy: Float, val c1: Int, val c2: Int, val big: Boolean)
+    private class Spark(var x: Float, var y: Float, var vx: Float, var vy: Float, val c: Int, var life: Float = 0f)
+    private class Bld(val x: Int, val w: Int, val h: Int)
+    private val shells = ArrayList<Shell>()
+    private val sparks = ArrayList<Spark>()
+    private var auto = 0f
+    private val blds = ArrayList<Bld>().apply {
+        var x = 0
+        while (x < 160) { val w = 4 + (rnd.nextFloat() * 8).toInt(); add(Bld(x, w, 2 + (rnd.nextFloat() * 7).toInt())); x += w }
+    }
+
+    private fun launch() {
+        shells += Shell(20f + rnd.nextFloat() * 120f, 46f, -(38f + rnd.nextFloat() * 14f),
+            Vivid[rnd.nextInt(Vivid.size)], Vivid[rnd.nextInt(Vivid.size)], rnd.nextFloat() > 0.5f)
+    }
+
+    override fun draw(g: DotBuf, a: DotAudio, t: Float, dt: Float) {
+        for (i in 0 until 30) g.setI((i * 53) % 160, 10 + (i * 17) % 20, 14)
+        if (a.newBeat) launch()
+        auto += dt
+        if (a.energy > 0.05f && auto > 1.7f) { auto = 0f; launch() }
+        val si = shells.iterator()
+        while (si.hasNext()) {
+            val s = si.next()
+            s.y += s.vy * dt; s.vy += 40f * dt
+            g.set(s.x, s.y, 9); g.set(s.x, s.y + 1f, 17); g.set(s.x, s.y + 2f, 17)
+            if (s.vy > -6f) {
+                val n = if (s.big) 40 else 24
+                val sp = (if (s.big) 26f else 18f) * (0.8f + a.energy * 0.6f)
+                for (k in 0 until n) {
+                    val an = k / n.toFloat() * 2f * PI_F
+                    sparks += Spark(s.x, s.y, cos(an) * sp, sin(an) * sp, if (k % 3 != 0) s.c1 else s.c2)
+                }
+                si.remove()
+            }
+        }
+        val water = 47f
+        val damp = exp(-dt * 0.9f)
+        val it = sparks.iterator()
+        while (it.hasNext()) {
+            val p = it.next()
+            p.life += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 14f * dt; p.vx *= damp; p.vy *= damp
+            if (p.life > 1.6f || p.y > water) { it.remove(); continue }
+            val c = when {
+                p.life < 0.12f -> 12
+                p.life < 0.7f -> p.c
+                p.life < 1.2f -> dimOf(p.c)
+                floor(p.life * 20f).toInt() % 2 == 1 -> dimOf(p.c)
+                else -> 0
+            }
+            g.set(p.x, p.y, c)
+            if (p.life < 0.9f) g.set(p.x - p.vx * 0.03f, p.y - p.vy * 0.03f, dimOf(p.c))
+            val ry = 2f * water - p.y + 2f
+            if (ry < 56f && ((r(p.x) + r(ry)) and 1) == 0) g.set(p.x + sin(ry + t * 4f), ry, dimOf(p.c))
+        }
+        for (b in blds) {
+            val top = water - 1f - b.h
+            g.fillRect(b.x.toFloat(), top, (b.w - 1).toFloat(), b.h.toFloat(), 0)
+            g.line(b.x.toFloat(), top, (b.x + b.w - 2).toFloat(), top, 16)
+            if (b.h > 4) g.set(b.x + 1f, water - b.h + 1f, 17)
+        }
+        g.line(0f, water, 159f, water, 16)
+        var y = water.toInt() + 2
+        while (y < 56) {
+            var x = (y * 3) % 7
+            while (x < 160) { g.set(x + sin(t * 2f + y) * 2f, y.toFloat(), 16); x += 9 }
+            y += 2
+        }
+    }
+}
+
+/** アーケード：昔のゲームセンター風のシューティング。自機が拍で撃ち、敵がはじける */
+private class ArcadeScene : DotScene("ARCADE") {
+    private val rnd = Random(12)
+    private val eA = arrayOf(".#####.", "##.#.##", "#######", ".#.#.#.", "#.....#")
+    private val eB = arrayOf(".#####.", "##.#.##", "#######", "#.#.#.#", ".#...#.")
+    private val ship = arrayOf("....#....", "...###...", ".#.###.#.", "#########", "##.#.#.##")
+    private val rowColor = intArrayOf(7, 9, 4)
+    private val down = FloatArray(24) // 0より大きい間は撃たれて消えている
+    private class Shot(val x: Float, var y: Float)
+    private class Boom(var x: Float, var y: Float, val vx: Float, val vy: Float, val c: Int, var life: Float = 0f)
+    private class Star(val x: Float, var y: Float, val s: Float)
+    private val shots = ArrayList<Shot>()
+    private val booms = ArrayList<Boom>()
+    private val stars = List(30) { Star(rnd.nextFloat() * 160f, 9f + rnd.nextFloat() * 46f, 4f + rnd.nextFloat() * 10f) }
+    private var shipX = 80f
+    private var target = 80f
+    private var step = 0
+
+    override fun draw(g: DotBuf, a: DotAudio, t: Float, dt: Float) {
+        for (s in stars) { s.y += s.s * dt; if (s.y > 55f) s.y = 9f; g.set(s.x, s.y, if (s.s > 9f) 2 else 1) }
+        if (a.newBeat) { step++; target = 14f + rnd.nextFloat() * 132f; shots += Shot(shipX, 46f) }
+        val ox = 26f + r(sin(step * 0.5f) * 10f); val oy = 14f
+        val frame = if (step % 2 == 1) eA else eB
+        for (i in 0 until 24) {
+            if (down[i] > 0f) { down[i] -= dt; continue }
+            val col = rowColor[i / 8]
+            g.sprite(frame, ox + (i % 8) * 14, oy + (i / 8) * 8, false) { if (it == '#') col else -1 }
+        }
+        shipX += (target - shipX) * min(1f, dt * 3f)
+        val si = shots.iterator()
+        while (si.hasNext()) {
+            val s = si.next()
+            s.y -= dt * 80f
+            var hit = -1
+            for (k in 0 until 24) {
+                if (down[k] > 0f) continue
+                val cx = ox + (k % 8) * 14; val cy = oy + (k / 8) * 8
+                if (s.x >= cx && s.x <= cx + 6f && s.y >= cy && s.y <= cy + 4f) { hit = k; break }
+            }
+            if (hit >= 0) {
+                down[hit] = 4f + rnd.nextFloat() * 4f
+                val cx = ox + (hit % 8) * 14 + 3f; val cy = oy + (hit / 8) * 8 + 2f
+                repeat(14) {
+                    val an = rnd.nextFloat() * 2f * PI_F; val sp = 10f + rnd.nextFloat() * 25f
+                    booms += Boom(cx, cy, cos(an) * sp, sin(an) * sp, Vivid[rnd.nextInt(6)])
+                }
+                si.remove(); continue
+            }
+            if (s.y < 9f) { si.remove(); continue }
+            g.line(s.x, s.y, s.x, s.y + 2f, 9)
+        }
+        val bi = booms.iterator()
+        while (bi.hasNext()) {
+            val b = bi.next()
+            b.life += dt; b.x += b.vx * dt; b.y += b.vy * dt
+            if (b.life > 0.5f) { bi.remove(); continue }
+            g.set(b.x, b.y, if (b.life < 0.25f) b.c else dimOf(b.c))
+        }
+        g.sprite(ship, shipX - 4f, 49f, false) { if (it == '#') 2 else -1 }
+        g.set(shipX, 49f, 12)
+        if (a.kick > 0.6f) { g.set(shipX - 1f, 54f, 10); g.set(shipX + 1f, 54f, 10); g.set(shipX, 55f, 9) }
+        g.line(0f, 55f, 159f, 55f, 15)
+    }
+}
+
 // ---------------- まとめ役（状態を持ち、毎フレーム描く） ----------------
 
-internal const val DOT_SCENE_COUNT = 8
+internal const val DOT_SCENE_COUNT = 10
 
 private val DotColors = intArrayOf(
     Color(0xFF0C1216).toArgb(), // 消灯
@@ -723,6 +870,17 @@ private val DotColors = intArrayOf(
     Color(0xFF78FF8C).toArgb(), // 緑（曲名）
     Color(0xFFFFB03C).toArgb(), // 琥珀
     Color(0xFFFF4632).toArgb(), // 赤
+    Color(0xFFFF5FB0).toArgb(), // ピンク
+    Color(0xFFA86BFF).toArgb(), // 紫
+    Color(0xFFFFE14A).toArgb(), // 黄
+    Color(0xFFFF8A2A).toArgb(), // オレンジ
+    Color(0xFF4682FF).toArgb(), // 青
+    Color(0xFFFFFFFF).toArgb(), // 白
+    Color(0xFF601E42).toArgb(), // 暗いピンク
+    Color(0xFF3E2668).toArgb(), // 暗い紫
+    Color(0xFF1E5C2C).toArgb(), // 暗い緑
+    Color(0xFF182C68).toArgb(), // 暗い青
+    Color(0xFF604A14).toArgb(), // 暗い黄
 )
 
 internal class DotState {
@@ -731,6 +889,7 @@ internal class DotState {
     private val scenes: List<DotScene> = listOf(
         ClubScene(), DriveScene(), SpeakerScene(), LiveScene(),
         SunsetScene(), CityScene(), SpaceScene(), AquaScene(),
+        FireworksScene(), ArcadeScene(),
     )
     private var t = 0f
     private var capText: String? = null

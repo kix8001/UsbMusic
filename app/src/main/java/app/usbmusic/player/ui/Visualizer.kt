@@ -69,6 +69,9 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     DOT_CITY("dot_city", "ドット絵 シティ", "16棟のビルの窓明かりがイコライザーになります"),
     DOT_SPACE("dot_space", "ドット絵 スペース", "輪のある惑星と回る月。ときどき流れ星"),
     DOT_AQUA("dot_aqua", "ドット絵 アクアリウム", "魚と水草。拍で宝箱が開いて泡がのぼります"),
+    DOT_HANABI("dot_hanabi", "ドット絵 花火", "夜の川べりに色とりどりの花火。拍で打ち上がり、川面に映ります"),
+    DOT_ARCADE("dot_arcade", "ドット絵 アーケード", "昔のゲームセンター風シューティング。拍で自機が撃ちます"),
+    CASSETTE("cassette", "カセットデッキ", "銀色の据え置きデッキ。リールの巻き具合が曲の再生位置に合わせて変わります"),
     ;
 
     companion object {
@@ -190,6 +193,13 @@ private class Meter {
         d.render(scope, index, bands(level, 16), dt, caption, time)
     }
 
+    // カセットデッキ（使うときに作る）
+    private var deck: DeckState? = null
+    fun drawDeck(scope: androidx.compose.ui.graphics.drawscope.DrawScope, playing: Boolean, progress: Float, title: String, artist: String) {
+        val d = deck ?: DeckState().also { deck = it }
+        d.render(scope, dt, playing, progress, lr[0], lr[1], lrPeak[0], lrPeak[1], title, artist)
+    }
+
     // アナログVUの針（ばねのように動く）
     val needle = FloatArray(2)
     val needleVel = FloatArray(2)
@@ -205,13 +215,16 @@ fun Visualizer(
     timeText: () -> String = { "" },
     title: String = "",
     artist: String = "",
+    progress: () -> Float = { 0f },
 ) {
     if (style == VisStyle.OFF) return
     DotFont.init(androidx.compose.ui.platform.LocalContext.current)
+    if (style == VisStyle.CASSETTE) HandFont.init(androidx.compose.ui.platform.LocalContext.current)
     val currentCaption by rememberUpdatedState(caption)
     val currentTime by rememberUpdatedState(timeText)
     val currentTitle by rememberUpdatedState(title)
     val currentArtist by rememberUpdatedState(artist)
+    val currentProgress by rememberUpdatedState(progress)
     val meter = remember { Meter() }
     var frame by remember { mutableLongStateOf(0L) }
     val isPlaying by rememberUpdatedState(playing)
@@ -269,6 +282,9 @@ fun Visualizer(
                 VisStyle.DOT_CITY -> meter.drawDot(this, 5, currentCaption, currentTime())
                 VisStyle.DOT_SPACE -> meter.drawDot(this, 6, currentCaption, currentTime())
                 VisStyle.DOT_AQUA -> meter.drawDot(this, 7, currentCaption, currentTime())
+                VisStyle.DOT_HANABI -> meter.drawDot(this, 8, currentCaption, currentTime())
+                VisStyle.DOT_ARCADE -> meter.drawDot(this, 9, currentCaption, currentTime())
+                VisStyle.CASSETTE -> meter.drawDeck(this, isPlaying, currentProgress(), currentTitle, currentArtist)
                 VisStyle.OFF -> Unit
             }
         }
@@ -1000,7 +1016,7 @@ private fun dotLabel(text: String): Pair<Int, BooleanArray> =
 internal const val DOT_ROWS = 14 // ドットフォント12px（上11・下3）がちょうど収まる高さ
 
 /** 昔の表示器のような点で描くために作られたドットフォント（PixelMplus12 / M+ FONT LICENSE） */
-private object DotFont {
+internal object DotFont {
     @Volatile var typeface: Typeface? = null
     fun init(context: android.content.Context) {
         if (typeface == null) {

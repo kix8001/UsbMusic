@@ -72,6 +72,9 @@ enum class VisStyle(val id: String, val label: String, val desc: String) {
     DOT_HANABI("dot_hanabi", "ドット絵 花火", "夜の川べりに色とりどりの花火。拍で打ち上がり、川面に映ります"),
     DOT_ARCADE("dot_arcade", "ドット絵 アーケード", "昔のゲームセンター風シューティング。拍で自機が撃ちます"),
     CASSETTE("cassette", "カセットデッキ", "銀色の据え置きデッキ。リールの巻き具合が曲の再生位置に合わせて変わります"),
+    SURF("surf", "トロピカル・サーフ", "南の海で波に乗るサーファー。曲の進みで昼→夕焼け→夜に変わります"),
+    HIGHWAY("highway", "コースト・ハイウェイ", "海沿いの道をジムニーが走ります。曲の進みで昼→夕焼け→夜"),
+    DIRT("dirt", "ダートトラック", "林の中の土の道をジムニーが走ります。曲の進みで昼→夕焼け→夜"),
     ;
 
     companion object {
@@ -193,6 +196,13 @@ private class Meter {
         d.render(scope, index, bands(level, 16), dt, caption, time)
     }
 
+    // 景色（使うときに作る）
+    private var scenery: SceneryState? = null
+    fun drawScenery(scope: androidx.compose.ui.graphics.drawscope.DrawScope, kind: Int, playing: Boolean, progress: Float) {
+        val s = scenery ?: SceneryState().also { scenery = it }
+        s.render(scope, kind, dt, playing, progress, bands(level, 16))
+    }
+
     // カセットデッキ（使うときに作る）
     private var deck: DeckState? = null
     fun drawDeck(scope: androidx.compose.ui.graphics.drawscope.DrawScope, playing: Boolean, progress: Float, title: String, artist: String) {
@@ -285,6 +295,9 @@ fun Visualizer(
                 VisStyle.DOT_HANABI -> meter.drawDot(this, 8, currentCaption, currentTime())
                 VisStyle.DOT_ARCADE -> meter.drawDot(this, 9, currentCaption, currentTime())
                 VisStyle.CASSETTE -> meter.drawDeck(this, isPlaying, currentProgress(), currentTitle, currentArtist)
+                VisStyle.SURF -> meter.drawScenery(this, SCENE_SURF, isPlaying, currentProgress())
+                VisStyle.HIGHWAY -> meter.drawScenery(this, SCENE_COAST, isPlaying, currentProgress())
+                VisStyle.DIRT -> meter.drawScenery(this, SCENE_DIRT, isPlaying, currentProgress())
                 VisStyle.OFF -> Unit
             }
         }

@@ -70,7 +70,7 @@ private val Keys = arrayOf(
     Key(1.00f, cc(0xFF040714), cc(0xFF0A1430), cc(0xFF16264A), cc(0xFF0C1A38), cc(0xFF040A1C), cc(0xFFFFFFFF), cc(0xFF5A7AB0), cc(0xFF03050C), 0.12f),
 )
 
-private class Pal {
+private class ScenePal {
     var skyT = 0; var skyM = 0; var skyB = 0; var sea = 0; var seaD = 0; var sun = 0; var haze = 0; var dark = 0
     var light = 1f
     var p = 0f
@@ -146,7 +146,7 @@ private const val HOR = 172f
 
 internal class SceneryState {
     private val audio = DotAudio()
-    private val pal = Pal()
+    private val pal = ScenePal()
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val rnd = kotlin.random.Random(9)

@@ -588,14 +588,18 @@ internal class SceneryState {
         val bump = if (C.sea || !playing) 0f else sin(t * 23f) * 1.8f + sin(t * 7.3f) * 1.5f
         st.bounce += ((if (audio.bass > 0.75f || audio.kick > 0.8f) -5f else 0f) - st.bounce) * min(1f, dt * 12f)
         val shake = if (playing) sin(t * 18f) * 0.8f else 0f
-        jimny(cv, carX, 392f + st.bounce + bump + shake, -curveNow * 0.025f + bump * 0.003f, audio.kick > 0.6f, night)
+        jimny(cv, carX, 392f + st.bounce + bump + shake, -curveNow * 0.025f + bump * 0.003f, audio.kick > 0.6f, night, dt, playing)
     }
 
     // ---------------- グレーのジムニー（JB64）の後ろ姿 ----------------
 
     private val layerRect = RectF()
+    private val jimnyFace = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+    private class Puff(var x: Float, var y: Float, var vx: Float, val vy: Float, var r: Float, var life: Float)
+    private val puffs = ArrayList<Puff>()
+    private var puffTimer = 2f
 
-    private fun jimny(cv: Canvas, cx: Float, by: Float, lean: Float, brake: Boolean, night: Float) {
+    private fun jimny(cv: Canvas, cx: Float, by: Float, lean: Float, brake: Boolean, night: Float, dt: Float, playing: Boolean) {
         val P = pal
         cv.save(); cv.translate(cx, by); cv.rotate(lean * 180f / PI_F)
         // 影
@@ -609,9 +613,11 @@ internal class SceneryState {
             val tp = fill(cc(0xFF262729))
             for (k in 0 until 6) cv.drawRect(tx - 10f, -58f + k * 10, tx + 10f, -54f + k * 10, tp)
         }
-        cv.drawRect(-70f, -54f, 70f, -34f, fill(cc(0xFF1C1D1F)))
-        ellipse(cv, 52f, -40f, 7f, 5f, fill(cc(0xFF3A3B3D)))
-        ellipse(cv, 52f, -40f, 4f, 3f, fill(cc(0xFF111111)))
+        cv.drawRect(-70f, -48f, 70f, -34f, fill(cc(0xFF1C1D1F)))
+        // マフラー（右下）
+        cv.drawRect(64f, -42f, 78f, -36f, fill(cc(0xFF2A2B2D)))
+        ellipse(cv, 78f, -39f, 4f, 4f, fill(cc(0xFF4A4B4D)))
+        ellipse(cv, 78f, -39f, 2.4f, 2.4f, fill(cc(0xFF0A0A0A)))
         // ボディ（箱型、少し上すぼまり）
         path.reset(); path.moveTo(-108f, -70f); path.lineTo(-104f, -196f); path.quadTo(-102f, -206f, -92f, -207f)
         path.lineTo(92f, -207f); path.quadTo(102f, -206f, 104f, -196f); path.lineTo(108f, -70f); path.close()
@@ -630,30 +636,39 @@ internal class SceneryState {
         cv.drawPath(rr(-98f, -200f, 196f, 128f, 6f), stroke(alpha(0, 0.35f), 1.5f))
         val dark = fill(cc(0xFF2B2D30))
         cv.drawRect(94f, -186f, 102f, -170f, dark); cv.drawRect(94f, -104f, 102f, -88f, dark)
-        cv.drawPath(rr(-86f, -126f, 26f, 8f, 3f), fill(cc(0xFF2B2D30)))
-        // スペアタイヤ
-        val stx = 14f; val sty = -102f
-        cv.drawCircle(stx, sty, 52f, fill(cc(0xFF141516)))
-        val tread = stroke(cc(0xFF2A2B2D), 2f)
-        for (k in 0 until 36) { val a = k / 36f * TAU; cv.drawLine(stx + cos(a) * 44f, sty + sin(a) * 44f, stx + cos(a) * 51f, sty + sin(a) * 51f, tread) }
-        reset(); p.shader = RadialGradient(stx - 12f, sty - 12f, 44f, cc(0xFF5A5D61), cc(0xFF2A2C2F), Shader.TileMode.CLAMP)
-        cv.drawCircle(stx, sty, 38f, p)
-        cv.drawCircle(stx, sty, 30f, stroke(cc(0xFF1B1C1E), 2f))
-        reset(); p.color = cc(0xFFC9CCD0); p.typeface = condensedItalic; p.textSize = 17f; p.textAlign = Paint.Align.CENTER
+        cv.drawPath(rr(-94f, -124f, 26f, 8f, 3f), fill(cc(0xFF2B2D30)))
+        // スペアタイヤ（黒いソフトカバー。写真のとおり大きく中央に）
+        val stx = 0f; val sty = -114f; val sr = 60f
+        reset(); p.shader = RadialGradient(stx - 18f, sty - 22f, sr * 1.25f, cc(0xFF2E2E30), cc(0xFF0C0C0D), Shader.TileMode.CLAMP)
+        p.setShadowLayer(6f, 0f, 3f, alpha(0, 0.5f))
+        cv.drawCircle(stx, sty, sr, p)
+        cv.drawCircle(stx, sty, sr - 3f, stroke(cc(0xFF050505), 1.2f))
+        oval.set(stx - sr + 6f, sty - sr + 6f, stx + sr - 6f, sty + sr - 6f)
+        cv.drawArc(oval, 200f, 70f, false, stroke(alpha(0xFFFFFF, 0.10f), 2f, true))
+        reset(); p.color = cc(0xFFF2F2F2); p.typeface = condensedBold; p.textSize = 8.5f; p.textAlign = Paint.Align.CENTER; p.letterSpacing = 0.06f
+        cv.drawText("TOUGH & NEAT", stx + 16f, sty - 13f, p)
+        reset(); p.color = cc(0xFFF7F7F7); p.typeface = jimnyFace; p.textSize = 27f; p.textAlign = Paint.Align.CENTER; p.letterSpacing = 0.02f
         var fm = p.fontMetrics
-        cv.drawText("Jimny", stx, sty - (fm.ascent + fm.descent) / 2f, p)
-        // リアバンパーとテールランプ
-        cv.drawPath(rr(-114f, -76f, 228f, 32f, 6f), vGrad(-76f, -44f, intArrayOf(cc(0xFF2C2D30), cc(0xFF141517))))
-        for (s in intArrayOf(-1, 1)) {
-            val lx = s * 92f
-            cv.drawRect(lx - 14f, -72f, lx + 14f, -63f, fill(cc(0xFFE9EEF2)))
-            cv.drawRect(lx - 14f, -63f, lx + 14f, -54f, fill(cc(0xFFB5231B)))
-            cv.drawRect(lx - 14f, -54f, lx + 14f, -48f, fill(cc(0xFFFFAE3A)))
+        cv.drawText("Jimny", stx + 1f, sty + 2f - (fm.ascent + fm.descent) / 2f, p)
+        // リアバンパー（ボディと同じ幅）とテールランプ（外側が赤、内側が白いバックランプ）
+        cv.drawPath(rr(-108f, -76f, 216f, 32f, 4f), vGrad(-76f, -44f, intArrayOf(cc(0xFF2C2D30), cc(0xFF141517))))
+        cv.drawLine(-106f, -75f, 106f, -75f, stroke(alpha(0xFFFFFF, 0.12f), 1f))
+        for (sd in intArrayOf(-1, 1)) {
+            val outer = sd * 104f; val inner = sd * 50f
+            val l = min(outer, inner); val r = max(outer, inner)
+            cv.drawPath(rr(l - 1f, -73f, r - l + 2f, 18f, 3f), fill(cc(0xFF0E0E10)))
+            val redOuterEnd = outer - sd * 20f
+            val redInnerStart = inner + sd * 5f
+            cv.drawRect(min(outer, redOuterEnd), -72f, max(outer, redOuterEnd), -56f, vGrad(-72f, -56f, intArrayOf(cc(0xFFD8322A), cc(0xFF8E1A14))))
+            cv.drawRect(min(inner, redInnerStart), -72f, max(inner, redInnerStart), -56f, vGrad(-72f, -56f, intArrayOf(cc(0xFFD8322A), cc(0xFF8E1A14))))
+            cv.drawRect(min(redOuterEnd, redInnerStart), -72f, max(redOuterEnd, redInnerStart), -56f, vGrad(-72f, -56f, intArrayOf(cc(0xFFF4F6F8), cc(0xFFB9BEC4))))
+            val ln = stroke(alpha(0, 0.18f), 0.8f)
+            for (k in 1 until 4) cv.drawLine(min(redOuterEnd, redInnerStart), -72f + k * 4f, max(redOuterEnd, redInnerStart), -72f + k * 4f, ln)
         }
         // ナンバープレート
-        cv.drawPath(rr(-30f, -72f, 60f, 26f, 3f), fill(cc(0xFFF4F4EE)))
-        cv.drawPath(rr(-30f, -72f, 60f, 26f, 3f), stroke(cc(0xFF3A5A3A), 1.2f))
-        reset(); p.color = cc(0xFF2B4A2B); p.typeface = condensedBold; p.textSize = 18f; p.textAlign = Paint.Align.CENTER
+        cv.drawPath(rr(-30f, -74f, 60f, 27f, 3f), fill(cc(0xFFF4F4EE)))
+        cv.drawPath(rr(-30f, -74f, 60f, 27f, 3f), stroke(cc(0xFF3A5A3A), 1.2f))
+        reset(); p.color = cc(0xFF2B4A2B); p.typeface = condensedBold; p.textSize = 20f; p.textAlign = Paint.Align.CENTER; p.letterSpacing = 0.1f
         fm = p.fontMetrics
         cv.drawText("902", 0f, -59f - (fm.ascent + fm.descent) / 2f, p)
         // 映り込み
@@ -668,17 +683,42 @@ internal class SceneryState {
         // テールランプ（夜は点灯、拍でブレーキ）
         if (night > 0f || brake) {
             val on = if (brake) 1f else 0.6f * night
-            for (s in intArrayOf(-1, 1)) {
-                val lx = s * 92f
-                cv.drawCircle(lx, -58f, 34f, radial(lx, -58f, 34f, alpha(cc(0xFFFF2A1A), 0.55f * on), alpha(cc(0xFFFF2A1A), 0f)))
-                cv.drawRect(lx - 14f, -63f, lx + 14f, -54f, fill(alpha(cc(0xFFFF3A2A), on)))
+            for (sd in intArrayOf(-1, 1)) {
+                val outer = sd * 104f; val inner = sd * 50f
+                for ((a0, a1) in arrayOf(outer to outer - sd * 20f, inner to inner + sd * 5f)) {
+                    val cxl = (a0 + a1) / 2f
+                    cv.drawCircle(cxl, -64f, 30f, radial(cxl, -64f, 30f, alpha(cc(0xFFFF2A1A), 0.5f * on), alpha(cc(0xFFFF2A1A), 0f)))
+                    cv.drawRect(min(a0, a1), -72f, max(a0, a1), -56f, fill(alpha(cc(0xFFFF3A2A), on)))
+                }
             }
             if (brake) {
                 cv.drawCircle(0f, -201f, 26f, radial(0f, -201f, 26f, alpha(cc(0xFFFF3A2A), 0.5f), alpha(cc(0xFFFF3A2A), 0f)))
                 cv.drawRect(-18f, -203f, 18f, -199f, fill(cc(0xFFFF3A2A)))
             }
         }
-        if (night > 0f) cv.drawPath(rr(-30f, -72f, 60f, 26f, 3f), fill(alpha(cc(0xFFF4F4EE), 0.25f * night)))
+        // 排気ガス（ときどき、マフラーからふわっと出る）
+        if (playing) {
+            puffTimer -= dt
+            val burst = puffTimer <= 0f || (audio.newBeat && audio.beat % 16 == 0)
+            if (burst) {
+                puffTimer = 3f + rnd.nextFloat() * 5f
+                repeat(7 + rnd.nextInt(5)) { k ->
+                    puffs += Puff(80f, -38f, 18f + rnd.nextFloat() * 30f, 4f + rnd.nextFloat() * 14f, 3f + rnd.nextFloat() * 3f, -k * 0.06f)
+                }
+            } else if (rnd.nextFloat() < dt * 2f) puffs += Puff(80f, -38f, 14f + rnd.nextFloat() * 10f, 4f + rnd.nextFloat() * 6f, 2f, 0f)
+        }
+        val smoke = mixC(cc(0xFFD8DADC), P.dark, (1f - P.light) * 0.6f)
+        val pit = puffs.iterator()
+        while (pit.hasNext()) {
+            val q = pit.next()
+            q.life += dt
+            if (q.life < 0f) continue
+            q.x += q.vx * dt; q.y += q.vy * dt; q.r += dt * 22f; q.vx *= 0.97f
+            if (q.life > 1.6f) { pit.remove(); continue }
+            val a = 0.32f * (1f - q.life / 1.6f) * min(1f, q.life * 8f)
+            cv.drawCircle(q.x, q.y, q.r, radial(q.x, q.y, q.r, alpha(smoke, a), alpha(smoke, 0f)))
+        }
+        if (night > 0f) cv.drawPath(rr(-30f, -74f, 60f, 27f, 3f), fill(alpha(cc(0xFFF4F4EE), 0.25f * night)))
         cv.restore()
     }
 }

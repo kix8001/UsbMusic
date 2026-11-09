@@ -599,6 +599,11 @@ internal class SceneryState {
     private val puffs = ArrayList<Puff>()
     private var puffTimer = 2f
 
+    /** テールランプの台形（外側の上端 topOuter、内側の上端 topInner、下端 bottom） */
+    private fun lampPath(outer: Float, inner: Float, topOuter: Float, topInner: Float, bottom: Float) {
+        path.reset(); path.moveTo(outer, topOuter); path.lineTo(inner, topInner); path.lineTo(inner, bottom); path.lineTo(outer, bottom); path.close()
+    }
+
     private fun jimny(cv: Canvas, cx: Float, by: Float, lean: Float, brake: Boolean, night: Float, dt: Float, playing: Boolean) {
         val P = pal
         cv.save(); cv.translate(cx, by); cv.rotate(lean * 180f / PI_F)
@@ -656,7 +661,11 @@ internal class SceneryState {
         for (sd in intArrayOf(-1, 1)) {
             val outer = sd * 104f; val inner = sd * 50f
             val l = min(outer, inner); val r = max(outer, inner)
-            cv.drawPath(rr(l - 1f, -73f, r - l + 2f, 18f, 3f), fill(cc(0xFF0E0E10)))
+            // 台形：外側の辺が高く、内側へ向かって上の辺が下がる
+            lampPath(outer + sd * 1.5f, inner - sd * 1.5f, -75f, -70f, -55f)
+            cv.drawPath(path, fill(cc(0xFF0E0E10)))
+            lampPath(outer, inner, -73.5f, -68.5f, -56f)
+            cv.save(); cv.clipPath(path)
             val redOuterEnd = outer - sd * 20f
             val redInnerStart = inner + sd * 5f
             cv.drawRect(min(outer, redOuterEnd), -72f, max(outer, redOuterEnd), -56f, vGrad(-72f, -56f, intArrayOf(cc(0xFFD8322A), cc(0xFF8E1A14))))
@@ -664,6 +673,7 @@ internal class SceneryState {
             cv.drawRect(min(redOuterEnd, redInnerStart), -72f, max(redOuterEnd, redInnerStart), -56f, vGrad(-72f, -56f, intArrayOf(cc(0xFFF4F6F8), cc(0xFFB9BEC4))))
             val ln = stroke(alpha(0, 0.18f), 0.8f)
             for (k in 1 until 4) cv.drawLine(min(redOuterEnd, redInnerStart), -72f + k * 4f, max(redOuterEnd, redInnerStart), -72f + k * 4f, ln)
+            cv.restore()
         }
         // ナンバープレート
         cv.drawPath(rr(-30f, -74f, 60f, 27f, 3f), fill(cc(0xFFF4F4EE)))
@@ -688,8 +698,11 @@ internal class SceneryState {
                 for ((a0, a1) in arrayOf(outer to outer - sd * 20f, inner to inner + sd * 5f)) {
                     val cxl = (a0 + a1) / 2f
                     cv.drawCircle(cxl, -64f, 30f, radial(cxl, -64f, 30f, alpha(cc(0xFFFF2A1A), 0.5f * on), alpha(cc(0xFFFF2A1A), 0f)))
-                    cv.drawRect(min(a0, a1), -72f, max(a0, a1), -56f, fill(alpha(cc(0xFFFF3A2A), on)))
                 }
+                lampPath(outer, inner, -73.5f, -68.5f, -56f)
+                cv.save(); cv.clipPath(path)
+                for ((a0, a1) in arrayOf(outer to outer - sd * 20f, inner to inner + sd * 5f)) cv.drawRect(min(a0, a1) - 2f, -76f, max(a0, a1) + 2f, -54f, fill(alpha(cc(0xFFFF3A2A), on)))
+                cv.restore()
             }
             if (brake) {
                 cv.drawCircle(0f, -201f, 26f, radial(0f, -201f, 26f, alpha(cc(0xFFFF3A2A), 0.5f), alpha(cc(0xFFFF3A2A), 0f)))

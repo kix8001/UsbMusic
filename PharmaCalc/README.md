@@ -16,3 +16,6 @@ SwiftUI製の薬剤師向け電卓アプリ。iOS 16以上。
 - `main` 以外も含め、`PharmaCalc/` を変更して push すると GitHub Actions（`.github/workflows/pharmacalc-ios.yml`）が macOS 上で XcodeGen → xcodebuild を実行し、署名なしの `PharmaCalc.ipa` を `PharmaCalc-ipa` アーティファクトとして上げる。
 - その IPA を Sideloadly で自分の Apple ID で署名して iPhone に入れる（無料の Apple ID の場合は7日ごとに入れ直し）。
 - Mac でローカルに開く場合：`brew install xcodegen && cd PharmaCalc && xcodegen generate` で `PharmaCalc.xcodeproj` ができる。
+
+## ワークフローの設置（初回のみ・手作業）
+`PharmaCalc/ci/pharmacalc-ios.yml` の内容を `.github/workflows/pharmacalc-ios.yml` として GitHub 上で作成する（Claude の権限ではワークフローファイルを追加できないため）。

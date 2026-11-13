@@ -1,0 +1,44 @@
+name: Build PharmaCalc iOS
+
+on:
+  push:
+    paths:
+      - 'PharmaCalc/**'
+      - '.github/workflows/pharmacalc-ios.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: PharmaCalc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: XcodeGen でプロジェクト生成
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: ビルド（署名なし）
+        run: |
+          set -o pipefail
+          xcodebuild -project PharmaCalc.xcodeproj -scheme PharmaCalc \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: IPA 作成（Sideloadly で署名して入れる）
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/PharmaCalc.app Payload/
+          zip -qry PharmaCalc.ipa Payload
+          ls -la PharmaCalc.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PharmaCalc-ipa
+          path: PharmaCalc/PharmaCalc.ipa

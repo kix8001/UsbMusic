@@ -1,0 +1,5 @@
+PharmaCalc.xcodeproj/
+build/
+Payload/
+*.ipa
+PharmaCalc/Info.plist
